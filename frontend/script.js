@@ -1,149 +1,439 @@
 (() => {
+  'use strict';
+
   const $ = (id) => document.getElementById(id);
-  const controls = { kc: $('kc'), ti: $('ti'), td: $('td'), target: $('target') };
-  const outputs = { kc: $('kcOut'), ti: $('tiOut'), td: $('tdOut'), target: $('targetOut') };
-  const chart = $('responseChart');
-  const ctx = chart.getContext('2d');
-  const mint = '#65e6c4', orange = '#ffb36b', muted = '#9aa8bf', grid = '#273149', text = '#edf2fa';
-  let result = null;
+  const DEFAULTS = { kp: 5, ki: 0, kd: 0, speed: 2, lookahead: 24 };
+  const controls = {
+    kp: $('kp'), ki: $('ki'), kd: $('kd'),
+    speed: $('speed'), lookahead: $('lookahead')
+  };
+  const outputs = {
+    kp: $('kpOut'), ki: $('kiOut'), kd: $('kdOut'),
+    speed: $('speedOut'), lookahead: $('lookaheadOut')
+  };
+  const canvas = $('trackCanvas');
+  const ctx = canvas.getContext('2d');
+  const heroCanvas = $('heroCanvas');
+  const heroCtx = heroCanvas.getContext('2d');
 
-  function readSettings() { return { kc: +controls.kc.value, ti: +controls.ti.value, td: +controls.td.value, target: +controls.target.value }; }
-  function updateOutputs() { Object.keys(controls).forEach(k => outputs[k].value = k === 'kc' ? (+controls[k].value).toFixed(1) : controls[k].value); }
+  // Same-origin is used on Render. For local development, frontend can be
+  // served on another port and the FastAPI API is available at localhost:8000.
+  const API_BASE = window.LINEFOLLOWER_API_BASE || (
+    ['localhost', '127.0.0.1'].includes(window.location.hostname) &&
+    window.location.port && window.location.port !== '8000'
+      ? 'http://127.0.0.1:8000'
+      : ''
+  );
 
-  // Browser implementation of the first-order process and delayed controller output
-  // used by pid_tuning.py. Units are illustrative simulation time units.
-  function simulate({kc, ti, td, target}) {
-    const n = 1001, tf = 1000, dt = tf / (n - 1), processGain = 0.9, tauP = 175, delay = 15;
-    const t = [], sp = [], pv = [], op = [], pTerm = [], iTerm = [], dTerm = [];
-    let y = 23, integral = 0, previousPv = 23, iae = 0;
-    for (let i = 0; i < n; i++) {
-      const time = i * dt;
-      t.push(time);
-      sp.push(target);
-      if (i > 0) {
-        const delayedIndex = Math.max(0, i - Math.round(delay / dt));
-        const delayedOutput = op[delayedIndex] ?? 0;
-        y += dt * (-(y - 23) + processGain * delayedOutput) / tauP;
-      }
-      pv.push(y);
-      const error = target - y;
-      iae += Math.abs(error) * dt;
-      const p = kc * error;
-      const d = -kc * td * ((y - previousPv) / dt);
-      const proposedIntegral = integral + (kc / ti) * error * dt;
-      let output = p + proposedIntegral + d;
-      if (output > 100) { output = 100; }
-      else if (output < 0) { output = 0; }
-      else { integral = proposedIntegral; }
-      pTerm.push(p); iTerm.push(integral); dTerm.push(d); op.push(output);
-      previousPv = y;
-    }
-    const peak = Math.max(...pv);
-    const overshoot = Math.max(0, (peak - target) / Math.max(1, target - 23) * 100);
-    const band = Math.max(1, Math.abs(target) * .02);
-    let settling = null;
-    for (let i = 0; i < pv.length; i++) {
-      let settled = true;
-      for (let j = i; j < pv.length; j++) if (Math.abs(pv[j] - target) > band) { settled = false; break; }
-      if (settled) { settling = t[i]; break; }
-    }
-    return {t, sp, pv, op, iae, overshoot, settling, target};
+  const state = {
+    path: [],
+    drawing: false,
+    frames: [],
+    frameIndex: 0,
+    animationId: null,
+    playing: false,
+    hasRun: false,
+    robotTrail: [],
+    metrics: null
+  };
+
+  const mint = '#65e6c4';
+  const orange = '#ffb36b';
+  const muted = '#9aa8bf';
+  const grid = '#192235';
+
+  function settings() {
+    return {
+      pid: { kp: Number(controls.kp.value), ki: Number(controls.ki.value), kd: Number(controls.kd.value) },
+      speed: Number(controls.speed.value),
+      lookahead: Number(controls.lookahead.value),
+      max_steps: 1800
+    };
   }
 
-  function fitCanvas(canvas, context) {
-    const rect = canvas.getBoundingClientRect();
+  function updateOutputs() {
+    Object.keys(controls).forEach((key) => {
+      const value = Number(controls[key].value);
+      outputs[key].value = ['kp', 'speed'].includes(key) ? value.toFixed(1)
+        : key === 'lookahead' ? value.toFixed(0) : value.toFixed(2);
+    });
+  }
+
+  function setStatus(message, kind = '') {
+    const status = $('runStatus');
+    status.querySelector('span').textContent = message;
+    status.classList.toggle('status-error', kind === 'error');
+  }
+
+  function setApiStatus(message, healthy = null) {
+    const el = $('apiStatus');
+    el.textContent = message;
+    el.classList.toggle('api-error', healthy === false);
+    el.classList.toggle('api-ok', healthy === true);
+  }
+
+  function fitCanvas(target, context) {
+    const rect = target.getBoundingClientRect();
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    const w = Math.max(280, rect.width), h = Math.max(180, rect.height);
-    if (canvas.width !== Math.round(w * dpr) || canvas.height !== Math.round(h * dpr)) {
-      canvas.width = Math.round(w * dpr); canvas.height = Math.round(h * dpr);
+    const w = Math.max(1, rect.width);
+    const h = Math.max(1, rect.height);
+    if (target.width !== Math.round(w * dpr) || target.height !== Math.round(h * dpr)) {
+      target.width = Math.round(w * dpr);
+      target.height = Math.round(h * dpr);
     }
     context.setTransform(dpr, 0, 0, dpr, 0, 0);
-    return {w, h};
+    return { w, h };
   }
-  function drawChart() {
-    const {w, h} = fitCanvas(chart, ctx);
-    ctx.clearRect(0, 0, w, h);
-    const pad = {l: 43, r: 12, t: 16, b: 31};
-    const pw = w - pad.l - pad.r, ph = h - pad.t - pad.b;
-    const maxY = Math.max(80, result ? Math.ceil(Math.max(...result.pv, ...result.sp) / 10) * 10 + 10 : 80);
-    const x = i => pad.l + (i / 1000) * pw;
-    const y = v => pad.t + ph - (v / maxY) * ph;
-    ctx.font = '10px DM Mono, monospace'; ctx.lineWidth = 1; ctx.strokeStyle = grid; ctx.fillStyle = muted;
-    for (let val = 0; val <= maxY; val += 20) {
-      ctx.beginPath(); ctx.moveTo(pad.l, y(val)); ctx.lineTo(w - pad.r, y(val)); ctx.stroke();
-      ctx.textAlign = 'right'; ctx.textBaseline = 'middle'; ctx.fillText(String(val), pad.l - 9, y(val));
-    }
-    for (let i = 0; i <= 5; i++) {
-      const xx = pad.l + pw * i / 5; ctx.beginPath(); ctx.moveTo(xx, pad.t); ctx.lineTo(xx, pad.t + ph); ctx.stroke();
-      ctx.textAlign = 'center'; ctx.textBaseline = 'top'; ctx.fillText(String(i * 200), xx, pad.t + ph + 9);
-    }
-    ctx.fillStyle = muted; ctx.textAlign = 'left'; ctx.textBaseline = 'top'; ctx.fillText('OUTPUT', pad.l, 0);
-    ctx.textAlign = 'right'; ctx.fillText('TIME', w - pad.r, h - 10);
-    if (!result) return;
-    const drawLine = (values, color, width, dash = []) => {
-      ctx.beginPath(); ctx.strokeStyle = color; ctx.lineWidth = width; ctx.setLineDash(dash);
-      values.forEach((v, i) => i ? ctx.lineTo(x(i), y(v)) : ctx.moveTo(x(i), y(v)));
-      ctx.stroke(); ctx.setLineDash([]);
-    };
-    drawLine(result.sp, '#929db5', 1.5, [5, 5]);
-    drawLine(result.pv, mint, 2.4);
-    const opScaled = result.op.map(v => v * maxY / 100);
-    drawLine(opScaled, orange, 1.2, [3, 4]);
-  }
-  function renderMetrics() {
-    $('iaeMetric').textContent = result.iae.toLocaleString(undefined, {maximumFractionDigits: 1});
-    $('overshootMetric').textContent = result.overshoot.toFixed(1) + '%';
-    $('settlingMetric').textContent = result.settling == null ? 'Not settled' : Math.round(result.settling) + ' s';
-    $('sampleCount').textContent = result.t.length + ' samples';
-  }
-  function runSimulation() {
-    updateOutputs(); result = simulate(readSettings()); drawChart(); renderMetrics();
-    $('runStatus').textContent = 'SIMULATION COMPLETE';
-  }
-  Object.values(controls).forEach(el => el.addEventListener('input', () => { updateOutputs(); $('runStatus').textContent = 'PARAMETERS CHANGED'; }));
-  $('runBtn').addEventListener('click', runSimulation);
-  $('resetBtn').addEventListener('click', () => { controls.kc.value = 5; controls.ti.value = 60; controls.td.value = 7; controls.target.value = 60; runSimulation(); });
-  chart.addEventListener('mousemove', event => {
-    if (!result) return;
-    const rect = chart.getBoundingClientRect(), xPos = event.clientX - rect.left;
-    const index = Math.max(0, Math.min(1000, Math.round((xPos - 43) / Math.max(1, rect.width - 55) * 1000)));
-    const tip = $('chartTooltip'); tip.hidden = false;
-    tip.style.left = Math.max(0, Math.min(rect.width - 140, xPos + 12)) + 'px'; tip.style.top = '12px';
-    tip.innerHTML = `t = ${result.t[index].toFixed(0)}<br>SP = ${result.sp[index].toFixed(1)}<br>PV = ${result.pv[index].toFixed(2)}<br>Output = ${result.op[index].toFixed(1)}%`;
-  });
-  chart.addEventListener('mouseleave', () => $('chartTooltip').hidden = true);
 
-  // Seven-sensor illustrative line-following animation, inspired by the uploaded source.
-  const track = $('trackCanvas'), tctx = track.getContext('2d');
-  let animationFrame = 0, robot = {s: 0, running: false};
-  const path = [{x:.08,y:.82},{x:.18,y:.78},{x:.28,y:.66},{x:.38,y:.67},{x:.48,y:.52},{x:.57,y:.44},{x:.67,y:.49},{x:.78,y:.31},{x:.91,y:.22}];
-  function pointOnPath(s) {
-    const lengths = []; let total = 0;
-    for (let i=1;i<path.length;i++){const dx=path[i].x-path[i-1].x,dy=path[i].y-path[i-1].y;total+=Math.hypot(dx,dy);lengths.push(total);}
-    const target = s * total; let prev = 0;
-    for (let i=0;i<lengths.length;i++){if(target<=lengths[i]){const f=(target-prev)/(lengths[i]-prev);return {x:path[i].x+(path[i+1].x-path[i].x)*f,y:path[i].y+(path[i+1].y-path[i].y)*f,angle:Math.atan2(path[i+1].y-path[i].y,path[i+1].x-path[i].x)};}prev=lengths[i];}
-    const a=path[path.length-2],b=path[path.length-1];return {x:b.x,y:b.y,angle:Math.atan2(b.y-a.y,b.x-a.x)};
+  function drawGrid(context, w, h, spacing = 24, color = grid) {
+    context.strokeStyle = color;
+    context.lineWidth = 1;
+    for (let x = 0; x <= w; x += spacing) {
+      context.beginPath(); context.moveTo(x, 0); context.lineTo(x, h); context.stroke();
+    }
+    for (let y = 0; y <= h; y += spacing) {
+      context.beginPath(); context.moveTo(0, y); context.lineTo(w, y); context.stroke();
+    }
   }
-  function drawTrack() {
-    const {w,h}=fitCanvas(track,tctx); tctx.clearRect(0,0,w,h); tctx.fillStyle='#111a2b';tctx.fillRect(0,0,w,h);
-    tctx.strokeStyle='#202b41';tctx.lineWidth=1;
-    for(let xx=0;xx<w;xx+=24){tctx.beginPath();tctx.moveTo(xx,0);tctx.lineTo(xx,h);tctx.stroke();}for(let yy=0;yy<h;yy+=24){tctx.beginPath();tctx.moveTo(0,yy);tctx.lineTo(w,yy);tctx.stroke();}
-    const pts=path.map(p=>({x:p.x*w,y:p.y*h}));
-    tctx.lineCap='round';tctx.lineJoin='round';tctx.strokeStyle='#26324a';tctx.lineWidth=20;tctx.beginPath();pts.forEach((p,i)=>i?tctx.lineTo(p.x,p.y):tctx.moveTo(p.x,p.y));tctx.stroke();
-    tctx.strokeStyle='#65e6c4';tctx.globalAlpha=.12;tctx.lineWidth=2;tctx.stroke();tctx.globalAlpha=1;
-    tctx.strokeStyle='#080d17';tctx.lineWidth=8;tctx.beginPath();pts.forEach((p,i)=>i?tctx.lineTo(p.x,p.y):tctx.moveTo(p.x,p.y));tctx.stroke();
-    const pos=pointOnPath(robot.s),cx=pos.x*w,cy=pos.y*h,angle=pos.angle;
-    tctx.save();tctx.translate(cx,cy);tctx.rotate(angle);tctx.fillStyle='#65e6c4';tctx.strokeStyle='#b5ffec';tctx.lineWidth=1.5;tctx.beginPath();tctx.roundRect(-18,-12,36,24,6);tctx.fill();tctx.stroke();
-    tctx.fillStyle='#10251f';tctx.beginPath();tctx.moveTo(9,0);tctx.lineTo(1,-5);tctx.lineTo(1,5);tctx.closePath();tctx.fill();
-    const active = Math.min(6, Math.max(0, Math.round(3 + Math.sin(robot.s*17)*2)));
-    for(let i=0;i<7;i++){const sx=-13+i*4.3,sy=17;tctx.fillStyle=i===active||i===active-1||i===active+1?mint:'#53617a';tctx.beginPath();tctx.arc(sx,sy,2.2,0,Math.PI*2);tctx.fill();}
-    tctx.restore();
-    $('sensorBars').querySelectorAll('i').forEach((bar,i)=>bar.classList.toggle('active',Math.abs(i- (Math.min(6,Math.max(0,Math.round(3+Math.sin(robot.s*17)*2)))))<=1));
-    $('errorReadout').textContent='ERROR: '+(Math.sin(robot.s*17)*0.65).toFixed(2);
-    if(robot.running){robot.s+=.0018;if(robot.s>=1){robot.s=0;}animationFrame=requestAnimationFrame(drawTrack);}
+
+  function drawPolyline(context, points, color, width, dash = []) {
+    if (!points || points.length < 2) return;
+    context.save();
+    context.strokeStyle = color;
+    context.lineWidth = width;
+    context.lineCap = 'round';
+    context.lineJoin = 'round';
+    context.setLineDash(dash);
+    context.beginPath();
+    points.forEach((p, i) => i ? context.lineTo(p.x, p.y) : context.moveTo(p.x, p.y));
+    context.stroke();
+    context.restore();
   }
-  $('animateRobot').addEventListener('click',()=>{if(robot.running)return;robot.running=true;$('robotState').textContent='RUNNING';$('animateRobot').innerHTML='Running… <span>Ⅱ</span>';drawTrack();});
-  $('resetRobot').addEventListener('click',()=>{robot.running=false;cancelAnimationFrame(animationFrame);robot.s=0;$('robotState').textContent='IDLE';$('animateRobot').innerHTML='Run demo <span>▶</span>';drawTrack();});
-  if ('ResizeObserver' in window) { new ResizeObserver(() => { drawChart(); drawTrack(); }).observe(chart.parentElement); } else window.addEventListener('resize',()=>{drawChart();drawTrack();});
-  updateOutputs(); runSimulation(); drawTrack();
+
+  function drawRobot(context, frame, scale = 1) {
+    if (!frame) return;
+    context.save();
+    context.translate(frame.x, frame.y);
+    context.rotate(frame.heading);
+    context.scale(scale, scale);
+    context.fillStyle = mint;
+    context.strokeStyle = '#c1fff0';
+    context.lineWidth = 1.5;
+    context.beginPath();
+    context.roundRect(-12, -8, 24, 16, 4);
+    context.fill();
+    context.stroke();
+    context.fillStyle = '#0b1020';
+    context.beginPath();
+    context.moveTo(7, 0); context.lineTo(0, -4); context.lineTo(0, 4); context.closePath();
+    context.fill();
+    context.fillStyle = orange;
+    context.beginPath(); context.arc(0, 0, 2, 0, Math.PI * 2); context.fill();
+    context.restore();
+  }
+
+  function drawCanvas() {
+    const { w, h } = fitCanvas(canvas, ctx);
+    ctx.clearRect(0, 0, w, h);
+    ctx.fillStyle = '#03060c';
+    ctx.fillRect(0, 0, w, h);
+    drawGrid(ctx, w, h, 28, '#101827');
+
+    // A faint start marker helps users see where the robot will begin.
+    if (state.path.length) {
+      ctx.fillStyle = '#1e3d38';
+      ctx.beginPath(); ctx.arc(state.path[0].x, state.path[0].y, 10, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = mint; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.arc(state.path[0].x, state.path[0].y, 4, 0, Math.PI * 2); ctx.stroke();
+    }
+
+    drawPolyline(ctx, state.path, mint, 4);
+    drawPolyline(ctx, state.robotTrail, orange, 2);
+
+    if (state.frames.length && state.frameIndex < state.frames.length) {
+      drawRobot(ctx, state.frames[state.frameIndex]);
+    }
+
+    $('canvasEmpty').classList.toggle('hidden', state.path.length > 0);
+    $('pointCount').textContent = `${state.path.length} point${state.path.length === 1 ? '' : 's'}`;
+  }
+
+  function drawHero() {
+    const { w, h } = fitCanvas(heroCanvas, heroCtx);
+    heroCtx.clearRect(0, 0, w, h);
+    heroCtx.fillStyle = '#0b1220';
+    heroCtx.fillRect(0, 0, w, h);
+    drawGrid(heroCtx, w, h, 30, '#18243a');
+    const pts = [
+      {x: w*.06, y:h*.78}, {x:w*.18,y:h*.72}, {x:w*.27,y:h*.55},
+      {x:w*.43,y:h*.59}, {x:w*.55,y:h*.38}, {x:w*.68,y:h*.32},
+      {x:w*.77,y:h*.43}, {x:w*.91,y:h*.18}
+    ];
+    drawPolyline(heroCtx, pts, '#1b3b35', 13);
+    drawPolyline(heroCtx, pts, mint, 2);
+    const p = pts[4];
+    drawRobot(heroCtx, {x:p.x,y:p.y,heading:Math.atan2(pts[5].y-pts[4].y,pts[5].x-pts[4].x)}, .9);
+  }
+
+  function canvasPoint(event) {
+    const rect = canvas.getBoundingClientRect();
+    return {
+      x: Math.max(0, Math.min(rect.width, event.clientX - rect.left)),
+      y: Math.max(0, Math.min(rect.height, event.clientY - rect.top))
+    };
+  }
+
+  function clearRunState() {
+    stopAnimation();
+    state.frames = [];
+    state.frameIndex = 0;
+    state.robotTrail = [];
+    state.metrics = null;
+    state.hasRun = false;
+    $('meanError').textContent = '—';
+    $('maxError').textContent = '—';
+    $('resultMetric').textContent = '—';
+    $('resultHint').textContent = 'Waiting for a run';
+    $('currentError').textContent = '—';
+    $('currentSteering').textContent = '—';
+    $('currentStep').textContent = '—';
+    $('pauseBtn').disabled = true;
+    $('pauseBtn').textContent = 'Pause';
+    drawCanvas();
+  }
+
+  function pointerDown(event) {
+    if (state.playing) stopAnimation();
+    clearRunState();
+    state.drawing = true;
+    state.path = [];
+    canvas.setPointerCapture?.(event.pointerId);
+    state.path.push(canvasPoint(event));
+    drawCanvas();
+    event.preventDefault();
+  }
+
+  function pointerMove(event) {
+    if (!state.drawing) return;
+    const p = canvasPoint(event);
+    const last = state.path[state.path.length - 1];
+    if (!last || Math.hypot(p.x - last.x, p.y - last.y) >= 3) {
+      if (state.path.length < 2000) state.path.push(p);
+      drawCanvas();
+    }
+    event.preventDefault();
+  }
+
+  function pointerUp(event) {
+    if (!state.drawing) return;
+    state.drawing = false;
+    if (state.path.length > 1) {
+      setStatus('TRACK READY');
+      $('canvasEmpty').classList.add('hidden');
+    } else {
+      setStatus('DRAW A LONGER TRACK');
+    }
+    drawCanvas();
+    try { canvas.releasePointerCapture?.(event.pointerId); } catch (_) {}
+  }
+
+  async function checkBackend() {
+    try {
+      const response = await fetch(`${API_BASE}/api/health`, { method: 'GET' });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      setApiStatus('Backend connected', true);
+    } catch (error) {
+      setApiStatus('Backend unavailable — start FastAPI on port 8000', false);
+    }
+  }
+
+  function responseMessage(data, response) {
+    if (data && typeof data.detail === 'string') return data.detail;
+    if (data && Array.isArray(data.detail)) return data.detail.map(e => e.msg).join('; ');
+    return `Simulation request failed (${response.status}).`;
+  }
+
+  async function runSimulation() {
+    if (state.drawing) {
+      setStatus('FINISH DRAWING FIRST', 'error');
+      return;
+    }
+    if (state.path.length < 2) {
+      setStatus('DRAW A TRACK FIRST', 'error');
+      return;
+    }
+
+    stopAnimation();
+    $('startBtn').disabled = true;
+    $('restartBtn').disabled = true;
+    setStatus('SIMULATING…');
+    setApiStatus('Sending track to backend…');
+
+    try {
+      const payload = { path: state.path, ...settings() };
+      const response = await fetch(`${API_BASE}/api/simulate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(responseMessage(data, response));
+      if (!Array.isArray(data.frames) || data.frames.length === 0) {
+        throw new Error('The backend returned no simulation frames.');
+      }
+
+      state.frames = data.frames;
+      state.frameIndex = 0;
+      state.robotTrail = [];
+      state.metrics = data.metrics || {};
+      state.hasRun = true;
+      renderMetrics(state.metrics);
+      setApiStatus('Simulation calculated by backend', true);
+      setStatus('RUNNING');
+      $('pauseBtn').disabled = false;
+      $('pauseBtn').textContent = 'Pause';
+      state.playing = true;
+      $('startBtn').disabled = false;
+      $('restartBtn').disabled = false;
+      animateNextFrame();
+    } catch (error) {
+      setStatus('SIMULATION FAILED', 'error');
+      setApiStatus(error.message || 'Could not reach the backend', false);
+      $('startBtn').disabled = false;
+      $('restartBtn').disabled = false;
+    }
+  }
+
+  function renderMetrics(metrics) {
+    $('meanError').textContent = `${Number(metrics.mean_absolute_error_px ?? 0).toFixed(2)} px`;
+    $('maxError').textContent = `${Number(metrics.max_error_px ?? 0).toFixed(2)} px`;
+    $('resultMetric').textContent = metrics.reached_endpoint ? 'Completed' : 'Stopped';
+    $('resultHint').textContent = metrics.reached_endpoint
+      ? 'Reached the end of the track'
+      : 'Step limit reached before endpoint';
+    $('currentStep').textContent = `0 / ${metrics.steps ?? '—'}`;
+  }
+
+  function animateNextFrame() {
+    if (!state.playing || !state.frames.length) return;
+    const frame = state.frames[state.frameIndex];
+    if (!frame) {
+      finishAnimation();
+      return;
+    }
+    state.robotTrail.push({ x: frame.x, y: frame.y });
+    if (state.robotTrail.length > 700) state.robotTrail.shift();
+    $('currentError').textContent = `${Number(frame.cross_track_error).toFixed(2)} px`;
+    $('currentSteering').textContent = Number(frame.steering).toFixed(4);
+    $('currentStep').textContent = `${frame.step} / ${state.metrics?.steps ?? state.frames.length}`;
+    drawCanvas();
+    state.frameIndex += 1;
+
+    if (state.frameIndex >= state.frames.length) {
+      finishAnimation();
+      return;
+    }
+    // Backend returns sampled frames; this delay keeps the animation readable.
+    state.animationId = window.setTimeout(animateNextFrame, 16);
+  }
+
+  function finishAnimation() {
+    state.playing = false;
+    state.animationId = null;
+    $('pauseBtn').disabled = true;
+    $('pauseBtn').textContent = 'Pause';
+    setStatus(state.metrics?.reached_endpoint ? 'TRACK COMPLETE' : 'SIMULATION COMPLETE');
+    drawCanvas();
+  }
+
+  function stopAnimation() {
+    state.playing = false;
+    if (state.animationId !== null) {
+      clearTimeout(state.animationId);
+      state.animationId = null;
+    }
+  }
+
+  function pauseResume() {
+    if (state.playing) {
+      stopAnimation();
+      $('pauseBtn').textContent = 'Resume';
+      setStatus('PAUSED');
+    } else if (state.frames.length && state.frameIndex < state.frames.length) {
+      state.playing = true;
+      $('pauseBtn').textContent = 'Pause';
+      setStatus('RUNNING');
+      animateNextFrame();
+    }
+  }
+
+  function resetPid() {
+    controls.kp.value = DEFAULTS.kp;
+    controls.ki.value = DEFAULTS.ki;
+    controls.kd.value = DEFAULTS.kd;
+    controls.speed.value = DEFAULTS.speed;
+    controls.lookahead.value = DEFAULTS.lookahead;
+    updateOutputs();
+    clearRunState();
+    setStatus(state.path.length > 1 ? 'TRACK READY' : 'READY');
+    setApiStatus('PID defaults restored');
+  }
+
+  function clearTrack() {
+    state.path = [];
+    clearRunState();
+    setStatus('READY');
+    setApiStatus('Track cleared');
+  }
+
+  function loadExample() {
+    const { w, h } = canvas.getBoundingClientRect();
+    state.path = [
+      {x: w * .06, y: h * .78},
+      {x: w * .15, y: h * .76},
+      {x: w * .23, y: h * .64},
+      {x: w * .32, y: h * .56},
+      {x: w * .43, y: h * .60},
+      {x: w * .52, y: h * .43},
+      {x: w * .61, y: h * .35},
+      {x: w * .72, y: h * .42},
+      {x: w * .81, y: h * .25},
+      {x: w * .94, y: h * .19}
+    ];
+    clearRunState();
+    setStatus('EXAMPLE TRACK READY');
+    setApiStatus('Example track loaded');
+    drawCanvas();
+  }
+
+  Object.values(controls).forEach((input) => {
+    input.addEventListener('input', () => {
+      updateOutputs();
+      if (state.hasRun) setStatus('PARAMETERS CHANGED — RESTART TO APPLY');
+    });
+  });
+
+  canvas.addEventListener('pointerdown', pointerDown);
+  canvas.addEventListener('pointermove', pointerMove);
+  canvas.addEventListener('pointerup', pointerUp);
+  canvas.addEventListener('pointercancel', pointerUp);
+  $('startBtn').addEventListener('click', runSimulation);
+  $('restartBtn').addEventListener('click', runSimulation);
+  $('pauseBtn').addEventListener('click', pauseResume);
+  $('resetPidBtn').addEventListener('click', resetPid);
+  $('clearBtn').addEventListener('click', clearTrack);
+  $('exampleBtn').addEventListener('click', loadExample);
+
+  if ('ResizeObserver' in window) {
+    const observer = new ResizeObserver(() => { drawCanvas(); drawHero(); });
+    observer.observe(canvas.parentElement);
+    observer.observe(heroCanvas.parentElement);
+  } else {
+    window.addEventListener('resize', () => { drawCanvas(); drawHero(); });
+  }
+
+  updateOutputs();
+  drawCanvas();
+  drawHero();
+  checkBackend();
 })();

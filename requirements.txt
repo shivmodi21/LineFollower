@@ -1,1 +1,6 @@
-pygame==2.0.1
+fastapi
+uvicorn[standard]
+numpy
+pygame
+matplotlib
+scipy
