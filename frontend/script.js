@@ -372,96 +372,99 @@
     }
 
     function drawTrack() {
-        const {
-            w,
-            h
-        } = fitCanvas(track, tctx);
+        const { w, h } = fitCanvas(track, tctx);
         tctx.clearRect(0, 0, w, h);
-        tctx.fillStyle = '#111a2b';
+
+        // Drawing-area visual only: dark plotting surface, subtle grid, clean
+        // mint path, start marker, robot trail, and the existing vehicle/sensors.
+        // The hero illustration and all drawing controls remain untouched.
+        tctx.fillStyle = '#0b1220';
         tctx.fillRect(0, 0, w, h);
-        tctx.strokeStyle = '#202b41';
+        tctx.strokeStyle = '#1b2940';
         tctx.lineWidth = 1;
-        for (let xx = 0; xx < w; xx += 24) {
-            tctx.beginPath();
-            tctx.moveTo(xx, 0);
-            tctx.lineTo(xx, h);
-            tctx.stroke();
+        for (let xx = 0; xx <= w; xx += 30) {
+            tctx.beginPath(); tctx.moveTo(xx, 0); tctx.lineTo(xx, h); tctx.stroke();
         }
-        for (let yy = 0; yy < h; yy += 24) {
-            tctx.beginPath();
-            tctx.moveTo(0, yy);
-            tctx.lineTo(w, yy);
-            tctx.stroke();
+        for (let yy = 0; yy <= h; yy += 30) {
+            tctx.beginPath(); tctx.moveTo(0, yy); tctx.lineTo(w, yy); tctx.stroke();
         }
-        const pts = path.map(p => ({
-            x: p.x * w,
-            y: p.y * h
-        }));
+
+        const pts = path.map(p => ({ x: p.x * w, y: p.y * h }));
         if (pts.length > 1) {
+            // A restrained glow gives the path definition without the heavy road
+            // border used in the previous drawing area.
+            tctx.save();
             tctx.lineCap = 'round';
             tctx.lineJoin = 'round';
-            tctx.strokeStyle = '#26324a';
-            tctx.lineWidth = 20;
+            tctx.strokeStyle = 'rgba(101, 230, 196, 0.12)';
+            tctx.lineWidth = 12;
             tctx.beginPath();
-            pts.forEach((p, i) => i ? tctx.lineTo(p.x, p.y) : tctx.moveTo(p.x, p.y));
+            pts.forEach((point, i) => i ? tctx.lineTo(point.x, point.y) : tctx.moveTo(point.x, point.y));
             tctx.stroke();
-            tctx.strokeStyle = '#080d17';
-            tctx.lineWidth = 8;
+            tctx.strokeStyle = '#65e6c4';
+            tctx.lineWidth = 3;
             tctx.beginPath();
-            pts.forEach((p, i) => i ? tctx.lineTo(p.x, p.y) : tctx.moveTo(p.x, p.y));
+            pts.forEach((point, i) => i ? tctx.lineTo(point.x, point.y) : tctx.moveTo(point.x, point.y));
             tctx.stroke();
+            tctx.restore();
+
+            // Mark the path start so the vehicle's initial position is obvious.
+            tctx.fillStyle = '#102d2b';
+            tctx.beginPath(); tctx.arc(pts[0].x, pts[0].y, 8, 0, Math.PI * 2); tctx.fill();
+            tctx.strokeStyle = '#65e6c4'; tctx.lineWidth = 1.25;
+            tctx.beginPath(); tctx.arc(pts[0].x, pts[0].y, 4, 0, Math.PI * 2); tctx.stroke();
         } else if (pts.length === 1) {
-            tctx.beginPath();
-            tctx.arc(pts[0].x, pts[0].y, 4, 0, Math.PI * 2);
-            tctx.fillStyle = '#080d17';
-            tctx.fill();
+            tctx.fillStyle = '#65e6c4';
+            tctx.beginPath(); tctx.arc(pts[0].x, pts[0].y, 4, 0, Math.PI * 2); tctx.fill();
         }
+
+        // Show the traveled route in orange while animating.
+        if (sensorFrames.length > 1 && sensorFrameIndex > 1) {
+            const trail = sensorFrames.slice(0, sensorFrameIndex).map(frame => ({ x: frame.x * w, y: frame.y * h }));
+            tctx.save();
+            tctx.strokeStyle = 'rgba(255, 179, 107, 0.8)';
+            tctx.lineWidth = 1.8;
+            tctx.lineCap = 'round';
+            tctx.lineJoin = 'round';
+            tctx.beginPath();
+            trail.forEach((point, i) => i ? tctx.lineTo(point.x, point.y) : tctx.moveTo(point.x, point.y));
+            tctx.stroke();
+            tctx.restore();
+        }
+
         if (drawingEnabled) {
             updateSensorReadings();
             return;
         }
+
         const weights = sensorWeights[sensorModel.value] || sensorWeights['7'];
-        const forward = {
-            x: Math.cos(robot.heading),
-            y: Math.sin(robot.heading)
-        };
-        const normal = {
-            x: -forward.y,
-            y: forward.x
-        };
-        const cx = robot.x * w,
-            cy = robot.y * h;
+        const forward = { x: Math.cos(robot.heading), y: Math.sin(robot.heading) };
+        const normal = { x: -forward.y, y: forward.x };
+        const cx = robot.x * w, cy = robot.y * h;
         tctx.save();
         tctx.translate(cx, cy);
         tctx.rotate(robot.heading);
+        // Vehicle body.
         tctx.fillStyle = '#65e6c4';
-        tctx.strokeStyle = '#b5ffec';
+        tctx.strokeStyle = '#c1fff0';
         tctx.lineWidth = 1.5;
-        tctx.beginPath();
-        tctx.roundRect(-17, -11, 34, 22, 5);
-        tctx.fill();
-        tctx.stroke();
-        tctx.fillStyle = '#10251f';
-        tctx.beginPath();
-        tctx.moveTo(10, 0);
-        tctx.lineTo(2, -5);
-        tctx.lineTo(2, 5);
-        tctx.closePath();
-        tctx.fill();
+        tctx.beginPath(); tctx.roundRect(-15, -10, 30, 20, 5); tctx.fill(); tctx.stroke();
+        // Forward marker.
+        tctx.fillStyle = '#0b1220';
+        tctx.beginPath(); tctx.moveTo(9, 0); tctx.lineTo(2, -4); tctx.lineTo(2, 4); tctx.closePath(); tctx.fill();
         tctx.restore();
-        const sensorX = cx + forward.x * 13,
-            sensorY = cy + forward.y * 13;
-        if (environmentMode === 'sensor') weights.forEach((weight, i) => {
-            const x = sensorX + normal.x * weight * 5.2,
-                y = sensorY + normal.y * weight * 5.2;
-            tctx.beginPath();
-            tctx.arc(x, y, 3.1, 0, Math.PI * 2);
-            tctx.fillStyle = robot.sensors[i] ? '#65e6c4' : '#53617a';
-            tctx.fill();
-            tctx.strokeStyle = '#0b1020';
-            tctx.lineWidth = .7;
-            tctx.stroke();
-        });
+
+        const sensorX = cx + forward.x * 13, sensorY = cy + forward.y * 13;
+        if (environmentMode === 'sensor') {
+            weights.forEach((weight, i) => {
+                const x = sensorX + normal.x * weight * 5.2;
+                const y = sensorY + normal.y * weight * 5.2;
+                tctx.beginPath(); tctx.arc(x, y, 3.1, 0, Math.PI * 2);
+                tctx.fillStyle = robot.sensors[i] ? '#65e6c4' : '#53617a';
+                tctx.fill();
+                tctx.strokeStyle = '#0b1220'; tctx.lineWidth = .7; tctx.stroke();
+            });
+        }
         updateSensorReadings();
     }
 
