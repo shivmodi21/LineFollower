@@ -42,10 +42,24 @@
     }
 
     function fitCanvas(canvas, context) {
-        const rect = canvas.getBoundingClientRect();
+        const wrap = canvas.parentElement;
+        const sizedWrap = wrap && (
+            wrap.classList.contains('chart-wrap') ||
+            wrap.classList.contains('line-pid-chart-wrap') ||
+            wrap.classList.contains('line-plot-wrap')
+        );
         const dpr = Math.min(window.devicePixelRatio || 1, 2);
-        const w = Math.max(280, rect.width),
-            h = Math.max(180, rect.height);
+        let w, h;
+        if (sizedWrap && wrap.clientWidth > 0 && wrap.clientHeight > 0) {
+            w = wrap.clientWidth;
+            h = wrap.clientHeight;
+        } else {
+            const rect = canvas.getBoundingClientRect();
+            w = rect.width;
+            h = rect.height;
+        }
+        w = Math.max(280, w);
+        h = Math.max(180, h);
         if (canvas.width !== Math.round(w * dpr) || canvas.height !== Math.round(h * dpr)) {
             canvas.width = Math.round(w * dpr);
             canvas.height = Math.round(h * dpr);
@@ -293,6 +307,7 @@
         $('pidTuningView').hidden = !pid;
         $('trackSimulationView').hidden = pid;
         $('lineTelemetryPanel').hidden = pid;
+        $('environmentOptionsPanel').hidden = mode === 'path';
         $('sensorModelGroup').hidden = !sensor;
         $('pidTargetGroup').hidden = !pid;
         if (pid) {
@@ -746,13 +761,25 @@
     });
 
     if ('ResizeObserver' in window) {
+        let resizeFrame = 0;
         const redrawViews = () => {
             drawLinePidChart();
             drawTrack();
             drawTelemetryChart();
         };
-        if (linePidChart?.parentElement) new ResizeObserver(redrawViews).observe(linePidChart.parentElement);
-        if (track?.parentElement) new ResizeObserver(redrawViews).observe(track.parentElement);
+        const scheduleRedrawViews = () => {
+            if (resizeFrame) return;
+            resizeFrame = requestAnimationFrame(() => {
+                resizeFrame = 0;
+                redrawViews();
+            });
+        };
+        if (linePidChart?.parentElement) {
+            new ResizeObserver(scheduleRedrawViews).observe(linePidChart.parentElement);
+        }
+        if (track?.parentElement) {
+            new ResizeObserver(scheduleRedrawViews).observe(track.parentElement);
+        }
     } else window.addEventListener('resize', () => {
         drawLinePidChart();
         drawTrack();

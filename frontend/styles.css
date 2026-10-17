@@ -356,7 +356,7 @@ button, input {
     margin-bottom: 28px
 }
 
-.section-heading h2, .source-card h2 {
+.section-heading h2 {
     font: 600 clamp(28px, 3.5vw, 40px)/1.2 var(--display);
     letter-spacing: -.04em;
     margin: 10px 0 0
@@ -654,10 +654,7 @@ input[type=range]::-moz-range-thumb {
 }
 
 .pid-tuning-view {
-    display: flex;
-    flex-direction: column;
-    flex: 1 1 auto;
-    min-height: 0
+    display: block
 }
 
 .track-label {
@@ -811,37 +808,35 @@ input[type=range]::-moz-range-thumb {
     white-space: nowrap
 }
 
-.source-section {
+.impl-section {
     padding-top: 40px;
     padding-bottom: 60px
 }
 
-.source-card {
+.impl-card {
     padding: 30px;
     border: 1px solid var(--border);
     border-radius: 12px;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: 30px;
     background: radial-gradient(ellipse at 10% 0%, #17312f 0, transparent 55%), #101829
 }
 
-.source-card h2 {
-    font-size: 28px
+.impl-card h2 {
+    font: 600 clamp(24px, 3vw, 28px)/1.2 var(--display);
+    letter-spacing: -.03em;
+    margin: 12px 0 0
 }
 
-.source-card p {
-    max-width: 610px;
+.impl-card p {
+    max-width: 720px;
     font-size: 12px;
     color: var(--muted);
-    line-height: 1.8
+    line-height: 1.85;
+    margin: 16px 0 0
 }
 
-.source-card code {
-    color: var(--mint);
-    font-family: var(--mono);
-    font-size: 11px
+.impl-card strong {
+    color: var(--text);
+    font-weight: 600
 }
 
 .footer {
@@ -990,13 +985,8 @@ input[type=range]::-moz-range-thumb {
         text-align: left
     }
 
-    .source-card {
-        display: block;
+    .impl-card {
         padding: 23px
-    }
-
-    .source-card .button {
-        margin-top: 10px
     }
 
     .footer {
@@ -1204,15 +1194,24 @@ input[type=range]::-moz-range-thumb {
 .control-field select{width:100%;margin-top:7px;padding:10px;background:#111b2d;color:var(--text);border:1px solid #35425b;border-radius:6px;font:11px var(--font)}
 .sensor-controls .control-hint{font-size:10px;color:var(--muted);line-height:1.7;margin:14px 0 0}
 .sensor-gain[hidden]{display:none!important}
+.environment-options{margin:20px 0 0;padding:16px 0 0;border-top:1px solid var(--border)}
+.environment-options[hidden]{display:none!important}
+.environment-option-block[hidden]{display:none!important}
+.environment-option-block .panel-kicker{display:block;margin-bottom:12px}
+.environment-option-block .setpoint-group{margin-top:0;padding-top:0;border-top:0}
+.environment-option-block .control-field{margin-bottom:0}
+.controller-panel{margin-top:20px;padding-top:18px;border-top:1px solid var(--border)}
+.controller-panel>.panel-kicker{display:block;margin-bottom:14px}
 .line-controller-controls .control-group.compact-control{margin-top:18px}
+.line-controller-controls .control-field{margin-top:0;margin-bottom:14px}
 .line-controller-controls .control-group.compact-control:first-of-type{margin-top:0}
 .line-controller-controls .control-hint{margin:8px 0 0;font-size:10px;line-height:1.65}
 .line-controller-controls .environment-hint{margin-top:14px}
 .line-controller-controls .control-field .control-hint{margin-top:8px}
 .pid-tuning-view .pid-chart-heading{margin-bottom:16px}
 .pid-tuning-view .pid-chart-heading h3{font:600 22px/1.2 var(--display);letter-spacing:-.03em;margin:6px 0 0}
-.line-pid-chart-wrap{flex:1 1 auto;min-height:200px;height:auto;margin-top:12px}
-.line-pid-chart-wrap #linePidChart{width:100%;height:100%;min-height:200px;display:block}
+.line-pid-chart-wrap{flex:none;height:260px;min-height:260px;max-height:260px;margin-top:12px}
+.line-pid-chart-wrap #linePidChart{width:100%;height:100%;min-height:0;display:block}
 .line-pid-metrics{margin-top:12px;margin-inline:0}
 .line-pid-metrics .metric{padding:12px 14px}
 .line-pid-metrics .metric strong{font-size:20px}
@@ -1231,4 +1230,4 @@ input[type=range]::-moz-range-thumb {
 .line-telemetry .chart-key{padding:8px 0 0;font-size:9px}
 @media(max-width:900px){.line-metrics-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.line-layout{grid-template-columns:1fr}.line-visual-column{border-left:0;border-top:1px solid var(--border)}}
 @media(max-width:900px){.environment-tabs{grid-template-columns:1fr}}
-@media(max-width:560px){.environment-tabs{gap:8px}.environment-tab{padding:12px;grid-template-columns:22px 1fr;column-gap:7px}.environment-tab span{font-size:13px}.environment-tab small{font-size:9px}.line-telemetry{padding:14px 16px}.line-metrics-grid{gap:8px}.line-metrics-grid .metric{padding:10px 12px}.line-metrics-grid .metric strong{font-size:16px}.line-plot-wrap{height:150px}.line-actions{flex-wrap:wrap}.line-pid-chart-wrap{min-height:180px}.line-pid-chart-wrap #linePidChart{min-height:180px}}
+@media(max-width:560px){.environment-tabs{gap:8px}.environment-tab{padding:12px;grid-template-columns:22px 1fr;column-gap:7px}.environment-tab span{font-size:13px}.environment-tab small{font-size:9px}.line-telemetry{padding:14px 16px}.line-metrics-grid{gap:8px}.line-metrics-grid .metric{padding:10px 12px}.line-metrics-grid .metric strong{font-size:16px}.line-plot-wrap{height:150px}.line-actions{flex-wrap:wrap}.line-pid-chart-wrap{height:220px;min-height:220px;max-height:220px}}

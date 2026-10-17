@@ -93,20 +93,37 @@
 
                 <div class="line-layout panel">
                     <aside class="line-copy environment-controls">
-                        <span class="panel-kicker">CONTROLLER SETTINGS</span>
                         <h3 id="environmentTitle">PID tuning</h3>
                         <p id="environmentDescription">Adjust proportional, integral, and derivative action against a first-order process with dead time. When the response looks good, switch to sensor or path mode and run the line follower with the same gains.</p>
 
-                        <div class="sensor-controls line-controller-controls">
-                            <div class="control-field" id="sensorModelGroup" hidden>
-                                <label for="sensorModel">Sensor configuration</label>
-                                <select id="sensorModel">
-                                    <option value="2">Two sensors</option>
-                                    <option value="5">Five sensors</option>
-                                    <option value="7" selected>Seven sensors</option>
-                                </select>
-                                <p class="control-hint">More sensors give finer lateral error estimates; fewer sensors behave like the minimal setups in the original scripts.</p>
+                        <div class="environment-options" id="environmentOptionsPanel">
+                            <div class="environment-option-block" id="sensorModelGroup" hidden>
+                                <span class="panel-kicker">SENSOR SETUP</span>
+                                <div class="control-field">
+                                    <label for="sensorModel">Sensor configuration</label>
+                                    <select id="sensorModel">
+                                        <option value="2">Two sensors</option>
+                                        <option value="5">Five sensors</option>
+                                        <option value="7" selected>Seven sensors</option>
+                                    </select>
+                                    <p class="control-hint">More sensors give finer lateral error estimates; fewer sensors behave like the minimal setups in the original scripts.</p>
+                                </div>
                             </div>
+                            <div class="environment-option-block" id="pidTargetGroup">
+                                <span class="panel-kicker">STEP RESPONSE</span>
+                                <div class="control-group compact-control setpoint-group">
+                                    <div class="range-title">
+                                        <label for="lineTarget">Target setpoint</label><output id="lineTargetOut" for="lineTarget">60</output>
+                                    </div>
+                                    <input id="lineTarget" type="range" min="25" max="80" step="1" value="60">
+                                    <div class="range-ends"><span>Lower target</span><span>Higher target</span></div>
+                                    <p class="control-hint">Final process value for the step-response experiment (setpoint in the plot).</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="controller-panel line-controller-controls">
+                            <span class="panel-kicker">CONTROLLER</span>
                             <div class="control-field" id="controllerFieldGroup">
                                 <label for="sensorController">Controller</label>
                                 <select id="sensorController">
@@ -147,14 +164,6 @@
                                 <input id="sensorRatio" type="range" min="0" max="12" step="0.1" value="5">
                                 <div class="range-ends"><span>Weak steering</span><span>Strong steering</span></div>
                                 <p class="control-hint">Single gain scaling sensor error, matching the ratio-style controllers in the source scripts.</p>
-                            </div>
-                            <div class="control-group compact-control setpoint-group" id="pidTargetGroup">
-                                <div class="range-title">
-                                    <label for="lineTarget">Target setpoint</label><output id="lineTargetOut" for="lineTarget">60</output>
-                                </div>
-                                <input id="lineTarget" type="range" min="25" max="80" step="1" value="60">
-                                <div class="range-ends"><span>Lower target</span><span>Higher target</span></div>
-                                <p class="control-hint">Final process value for the step-response experiment (setpoint in the plot).</p>
                             </div>
                             <p class="control-hint environment-hint" id="controllerHint">Full PID combines current, accumulated, and changing error. Tau_I and Tau_D shape integral and derivative action.</p>
                         </div>
@@ -302,26 +311,19 @@
                 </div>
             </section>
 
-            <section class="source-section section-wrap">
-                <div class="source-card">
-                    <div>
-                        <div class="eyebrow">
-                            BUILT FROM YOUR PROJECT
-                        </div>
-                        <h2>
-                            Control theory, made tangible.
-                        </h2>
-                        <p>
-                            This showcase brings together the process model from <code>pid_tuning.py</code> and the sensor-based line-following ideas in your Pygame scripts.
-                        </p>
-                    </div>
-                    <a class="button secondary" href="#line-follower">Back to the lab <i class="fa-solid fa-arrow-up" aria-hidden="true"></i></a>
+            <section class="impl-section section-wrap" id="implementation">
+                <div class="impl-card">
+                    <div class="eyebrow">03 / IMPLEMENTATION</div>
+                    <h2>Behind this interface</h2>
+                    <p>
+                        The page you interact with is plain HTML, CSS, and JavaScript: it draws the track and charts, collects your tuning choices, and plays back results. The simulations themselves run in a Python <strong>FastAPI</strong> service—step-response tuning, sensor-based steering, and path-aware following—so the heavy work stays on the server and the browser only displays what comes back.
+                    </p>
                 </div>
             </section>
         </main>
 
         <footer class="footer section-wrap">
-            <a class="brand" href="#home"><span class="brand-mark"><i class="fa-solid fa-wave-square" aria-hidden="true"></i></span><span>PID<span class="brand-muted">LAB</span></span></a><span>Interactive control systems showcase</span><a href="#home">Back to top <i class="fa-solid fa-arrow-up" aria-hidden="true"></i></a>
+            <a class="brand" href="#home"><span class="brand-mark"><i class="fa-solid fa-wave-square" aria-hidden="true"></i></span><span>PID<span class="brand-muted">LAB</span></span></a><span>Interactive control systems</span><a href="#home">Back to top <i class="fa-solid fa-arrow-up" aria-hidden="true"></i></a>
         </footer>
         <script src="script.js"></script>
     </body>
