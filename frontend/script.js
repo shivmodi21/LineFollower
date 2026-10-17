@@ -10,44 +10,19 @@
   function readSettings() { return { kc: +controls.kc.value, ti: +controls.ti.value, td: +controls.td.value, target: +controls.target.value }; }
   function updateOutputs() { Object.keys(controls).forEach(k => outputs[k].value = k === 'kc' ? (+controls[k].value).toFixed(1) : controls[k].value); }
 
-  // Browser implementation of the first-order process and delayed controller output
-  // used by pid_tuning.py. Units are illustrative simulation time units.
-  function simulate({kc, ti, td, target}) {
-    const n = 1001, tf = 1000, dt = tf / (n - 1), processGain = 0.9, tauP = 175, delay = 15;
-    const t = [], sp = [], pv = [], op = [], pTerm = [], iTerm = [], dTerm = [];
-    let y = 23, integral = 0, previousPv = 23, iae = 0;
-    for (let i = 0; i < n; i++) {
-      const time = i * dt;
-      t.push(time);
-      sp.push(target);
-      if (i > 0) {
-        const delayedIndex = Math.max(0, i - Math.round(delay / dt));
-        const delayedOutput = op[delayedIndex] ?? 0;
-        y += dt * (-(y - 23) + processGain * delayedOutput) / tauP;
-      }
-      pv.push(y);
-      const error = target - y;
-      iae += Math.abs(error) * dt;
-      const p = kc * error;
-      const d = -kc * td * ((y - previousPv) / dt);
-      const proposedIntegral = integral + (kc / ti) * error * dt;
-      let output = p + proposedIntegral + d;
-      if (output > 100) { output = 100; }
-      else if (output < 0) { output = 0; }
-      else { integral = proposedIntegral; }
-      pTerm.push(p); iTerm.push(integral); dTerm.push(d); op.push(output);
-      previousPv = y;
+  // The process model and PID calculations now run in FastAPI.
+  async function simulate(settings) {
+    const response = await fetch(`${API_BASE}/api/pid-process`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(settings)
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      const detail = typeof data.detail === 'string' ? data.detail : 'PID process simulation request failed.';
+      throw new Error(detail);
     }
-    const peak = Math.max(...pv);
-    const overshoot = Math.max(0, (peak - target) / Math.max(1, target - 23) * 100);
-    const band = Math.max(1, Math.abs(target) * .02);
-    let settling = null;
-    for (let i = 0; i < pv.length; i++) {
-      let settled = true;
-      for (let j = i; j < pv.length; j++) if (Math.abs(pv[j] - target) > band) { settled = false; break; }
-      if (settled) { settling = t[i]; break; }
-    }
-    return {t, sp, pv, op, iae, overshoot, settling, target};
+    return data;
   }
 
   function fitCanvas(canvas, context) {
@@ -96,9 +71,23 @@
     $('settlingMetric').textContent = result.settling == null ? 'Not settled' : Math.round(result.settling) + ' s';
     $('sampleCount').textContent = result.t.length + ' samples';
   }
-  function runSimulation() {
-    updateOutputs(); result = simulate(readSettings()); drawChart(); renderMetrics();
-    $('runStatus').textContent = 'SIMULATION COMPLETE';
+  async function runSimulation() {
+    updateOutputs();
+    $('runBtn').disabled = true;
+    $('runStatus').textContent = 'CALCULATING…';
+    try {
+      result = await simulate(readSettings());
+      drawChart(); renderMetrics();
+      $('runStatus').textContent = 'SIMULATION COMPLETE';
+    } catch (error) {
+      $('runStatus').textContent = 'API ERROR';
+      $('iaeMetric').textContent = '—';
+      $('overshootMetric').textContent = '—';
+      $('settlingMetric').textContent = '—';
+      $('sampleCount').textContent = error.message || 'Could not reach API';
+    } finally {
+      $('runBtn').disabled = false;
+    }
   }
   Object.values(controls).forEach(el => el.addEventListener('input', () => { updateOutputs(); $('runStatus').textContent = 'PARAMETERS CHANGED'; }));
   $('runBtn').addEventListener('click', runSimulation);
