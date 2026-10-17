@@ -125,7 +125,9 @@
   const track = $('trackCanvas'), tctx = track.getContext('2d');
   let animationFrame = 0, sensorFrames = [], sensorFrameIndex = 0, requestToken = 0;
   let robot = {x:0,y:0,heading:0,running:false,step:0,integral:0,previousError:0,error:0,sensors:Array(7).fill(false)};
-  const path = [{x:.08,y:.82},{x:.18,y:.78},{x:.28,y:.66},{x:.38,y:.67},{x:.48,y:.52},{x:.57,y:.44},{x:.67,y:.49},{x:.78,y:.31},{x:.91,y:.22}];
+  const examplePath = [{x:.08,y:.82},{x:.18,y:.78},{x:.28,y:.66},{x:.38,y:.67},{x:.48,y:.52},{x:.57,y:.44},{x:.67,y:.49},{x:.78,y:.31},{x:.91,y:.22}];
+  let path = examplePath.map(point => ({...point}));
+  let drawingEnabled = false, isDrawing = false;
   const sensorKp = $('sensorKp'), sensorKi = $('sensorKi'), sensorKd = $('sensorKd');
   const sensorController = $('sensorController');
   const sensorModel = $('sensorModel');
@@ -167,8 +169,13 @@
     for(let xx=0;xx<w;xx+=24){tctx.beginPath();tctx.moveTo(xx,0);tctx.lineTo(xx,h);tctx.stroke();}
     for(let yy=0;yy<h;yy+=24){tctx.beginPath();tctx.moveTo(0,yy);tctx.lineTo(w,yy);tctx.stroke();}
     const pts=path.map(p=>({x:p.x*w,y:p.y*h}));
-    tctx.lineCap='round';tctx.lineJoin='round';tctx.strokeStyle='#26324a';tctx.lineWidth=20;tctx.beginPath();pts.forEach((p,i)=>i?tctx.lineTo(p.x,p.y):tctx.moveTo(p.x,p.y));tctx.stroke();
-    tctx.strokeStyle='#080d17';tctx.lineWidth=8;tctx.beginPath();pts.forEach((p,i)=>i?tctx.lineTo(p.x,p.y):tctx.moveTo(p.x,p.y));tctx.stroke();
+    if (pts.length > 1) {
+      tctx.lineCap='round';tctx.lineJoin='round';tctx.strokeStyle='#26324a';tctx.lineWidth=20;tctx.beginPath();pts.forEach((p,i)=>i?tctx.lineTo(p.x,p.y):tctx.moveTo(p.x,p.y));tctx.stroke();
+      tctx.strokeStyle='#080d17';tctx.lineWidth=8;tctx.beginPath();pts.forEach((p,i)=>i?tctx.lineTo(p.x,p.y):tctx.moveTo(p.x,p.y));tctx.stroke();
+    } else if (pts.length === 1) {
+      tctx.beginPath();tctx.arc(pts[0].x,pts[0].y,4,0,Math.PI*2);tctx.fillStyle='#080d17';tctx.fill();
+    }
+    if (drawingEnabled) { updateSensorReadings(); return; }
     const weights=sensorWeights[sensorModel.value] || sensorWeights['7'];
     const forward={x:Math.cos(robot.heading),y:Math.sin(robot.heading)};
     const normal={x:-forward.y,y:forward.x};
@@ -184,9 +191,16 @@
     requestToken++;
     robot.running=false; cancelAnimationFrame(animationFrame);
     sensorFrames=[]; sensorFrameIndex=0;
-    const a=path[0], b=path[1];
-    robot={x:a.x,y:a.y,heading:Math.atan2((b.y-a.y)*track.height,(b.x-a.x)*track.width),running:false,step:0,integral:0,previousError:0,error:0,sensors:Array(sensorWeights[sensorModel.value].length).fill(false)};
-    $('robotState').textContent='READY'; $('animateRobot').innerHTML='Run simulation <span>▶</span>';
+    if (path.length >= 2) {
+      const a=path[0], b=path[1];
+      robot={x:a.x,y:a.y,heading:Math.atan2((b.y-a.y)*track.height,(b.x-a.x)*track.width),running:false,step:0,integral:0,previousError:0,error:0,sensors:Array(sensorWeights[sensorModel.value].length).fill(false)};
+      $('robotState').textContent=drawingEnabled?'DRAW MODE':'READY';
+    } else {
+      robot={x:0,y:0,heading:0,running:false,step:0,integral:0,previousError:0,error:0,sensors:Array(sensorWeights[sensorModel.value].length).fill(false)};
+      $('robotState').textContent=drawingEnabled?'DRAW MODE':'NO TRACK';
+    }
+    $('animateRobot').disabled=drawingEnabled || path.length<2;
+    $('animateRobot').innerHTML='Run simulation <i class="fa-solid fa-play" aria-hidden="true"></i>';
     updateSensorReadings(); drawTrack();
   }
   function animateSensorFrames(token) {
@@ -194,7 +208,7 @@
     if(sensorFrameIndex>=sensorFrames.length){
       robot.running=false;
       $('robotState').textContent='COMPLETE';
-      $('animateRobot').innerHTML='Run again <span>▶</span>';
+      $('animateRobot').innerHTML='Run again <i class="fa-solid fa-play" aria-hidden="true"></i>';
       return;
     }
     const frame=sensorFrames[sensorFrameIndex++];
@@ -203,11 +217,16 @@
     animationFrame=requestAnimationFrame(()=>animateSensorFrames(token));
   }
   async function runSensorSimulation() {
-    if(robot.running)return;
+    if(robot.running || drawingEnabled)return;
+    if(path.length < 2 || pathLength(path) < 8) {
+      $('robotState').textContent='TRACK TOO SHORT';
+      $('drawHint').textContent='Draw a longer continuous path before running the robot.';
+      return;
+    }
     const token=++requestToken;
     robot.running=false;cancelAnimationFrame(animationFrame);
     $('robotState').textContent='CALCULATING';$('animateRobot').disabled=true;
-    $('animateRobot').innerHTML='Calculating… <span>⟳</span>';
+    $('animateRobot').innerHTML='Calculating… <i class="fa-solid fa-spinner fa-spin" aria-hidden="true"></i>';
     const {w,h}=fitCanvas(track,tctx);
     const payload={
       path, sensor_model:sensorModelApi[sensorModel.value], controller:sensorController.value,
@@ -223,18 +242,67 @@
       sensorFrames=data.frames || [];
       if(!sensorFrames.length)throw new Error('The backend returned no simulation frames.');
       sensorFrameIndex=0;
-      $('robotState').textContent='RUNNING';$('animateRobot').innerHTML='Running… <span>Ⅱ</span>';
+      $('robotState').textContent='RUNNING';$('animateRobot').innerHTML='Running… <i class="fa-solid fa-pause" aria-hidden="true"></i>';
       robot.running=true;
       animateSensorFrames(token);
     } catch(error) {
       if(token!==requestToken)return;
       $('robotState').textContent='API ERROR';
-      $('animateRobot').innerHTML='Retry simulation <span>↻</span>';
+      $('animateRobot').innerHTML='Retry simulation <i class="fa-solid fa-rotate-right" aria-hidden="true"></i>';
       $('sensorModelNote').textContent=`Could not run backend simulation: ${error.message}. Start FastAPI at http://127.0.0.1:8000 or check the deployed API URL.`;
     } finally {
       if(token===requestToken)$('animateRobot').disabled=false;
     }
   }
+  function pathLength(points) {
+    return points.slice(1).reduce((total, point, index) => total + Math.hypot((point.x-points[index].x)*track.clientWidth,(point.y-points[index].y)*track.clientHeight),0);
+  }
+  function setDrawingMode(enabled) {
+    drawingEnabled=enabled;
+    $('drawTrackBtn').innerHTML=enabled?'<i class="fa-solid fa-check" aria-hidden="true"></i> Finish drawing':'<i class="fa-solid fa-pencil" aria-hidden="true"></i> Draw track';
+    $('drawTrackBtn').classList.toggle('primary',enabled);
+    $('drawTrackBtn').classList.toggle('secondary',!enabled);
+    track.classList.toggle('drawing',enabled);
+    $('animateRobot').disabled=enabled || path.length<2;
+    $('exampleTrackBtn').disabled=enabled;
+    $('clearTrackBtn').disabled=enabled;
+    $('drawHint').textContent=enabled?'Drag on the canvas with your mouse or finger to draw one continuous black line. Select “Finish drawing” when done.':'Choose “Draw track” to edit the path, or run the robot on the current track.';
+    $('robotState').textContent=enabled?'DRAW MODE':(path.length>=2?'READY':'NO TRACK');
+  }
+  function canvasPoint(event) {
+    const rect=track.getBoundingClientRect();
+    return {x:Math.max(0,Math.min(1,(event.clientX-rect.left)/rect.width)),y:Math.max(0,Math.min(1,(event.clientY-rect.top)/rect.height))};
+  }
+  $('drawTrackBtn').addEventListener('click',()=>{
+    if(drawingEnabled){
+      isDrawing=false; setDrawingMode(false);
+      if(path.length<2 || pathLength(path)<8){
+        $('drawHint').textContent='That path is too short. Choose “Draw track” and draw a longer line.';
+        $('animateRobot').disabled=true; $('robotState').textContent='TRACK TOO SHORT'; return;
+      }
+      resetSensorRobot();
+      $('drawHint').textContent='Track saved. Run the simulation to make the robot follow your path.';
+    } else {
+      requestToken++; robot.running=false; cancelAnimationFrame(animationFrame);
+      path=[]; isDrawing=false; setDrawingMode(true); resetSensorRobot(); drawTrack();
+    }
+  });
+  track.addEventListener('pointerdown',event=>{
+    if(!drawingEnabled)return;
+    event.preventDefault(); track.setPointerCapture?.(event.pointerId);
+    isDrawing=true; path=[canvasPoint(event)]; drawTrack();
+  });
+  track.addEventListener('pointermove',event=>{
+    if(!drawingEnabled || !isDrawing)return;
+    const point=canvasPoint(event), previous=path[path.length-1];
+    const distance=Math.hypot((point.x-previous.x)*track.clientWidth,(point.y-previous.y)*track.clientHeight);
+    if(distance>=2){path.push(point);if(path.length>2000)path=path.filter((_,index)=>index%2===0);drawTrack();}
+  });
+  function finishPointerDrawing(){if(!isDrawing)return;isDrawing=false;drawTrack();}
+  track.addEventListener('pointerup',finishPointerDrawing);
+  track.addEventListener('pointercancel',finishPointerDrawing);
+  $('exampleTrackBtn').addEventListener('click',()=>{setDrawingMode(false);path=examplePath.map(point=>({...point}));$('drawHint').textContent='Example track loaded. You can run it or draw a custom path.';resetSensorRobot();});
+  $('clearTrackBtn').addEventListener('click',()=>{setDrawingMode(false);path=[];$('drawHint').textContent='Track cleared. Choose “Draw track” and draw a path before running the robot.';resetSensorRobot();});
   $('animateRobot').addEventListener('click',runSensorSimulation);
   $('resetRobot').addEventListener('click',resetSensorRobot);
   [sensorKp,sensorKi,sensorKd].forEach(el=>el.addEventListener('input',updateSensorGains));
