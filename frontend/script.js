@@ -11,18 +11,35 @@
   function updateOutputs() { Object.keys(controls).forEach(k => outputs[k].value = k === 'kc' ? (+controls[k].value).toFixed(1) : controls[k].value); }
 
   // The process model and PID calculations now run in FastAPI.
+  async function requestJSON(url, options, fallbackMessage) {
+    let response;
+    try {
+      response = await fetch(url, options);
+    } catch (error) {
+      throw new Error(`Cannot reach the API. Check that the backend is running and the URL is correct. (${error.message})`);
+    }
+    let data;
+    try {
+      data = await response.json();
+    } catch {
+      throw new Error(`The API returned an unreadable response (HTTP ${response.status}).`);
+    }
+    if (!response.ok) {
+      const detail = data.detail;
+      const message = Array.isArray(detail)
+        ? detail.map(item => item.msg || JSON.stringify(item)).join('; ')
+        : (typeof detail === 'string' ? detail : fallbackMessage);
+      throw new Error(message || `${fallbackMessage} (HTTP ${response.status})`);
+    }
+    return data;
+  }
+
   async function simulate(settings) {
-    const response = await fetch(`${API_BASE}/api/pid-process`, {
+    return requestJSON(`${API_BASE}/api/pid-process`, {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify(settings)
-    });
-    const data = await response.json();
-    if (!response.ok) {
-      const detail = typeof data.detail === 'string' ? data.detail : 'PID process simulation request failed.';
-      throw new Error(detail);
-    }
-    return data;
+    }, 'PID process simulation request failed.');
   }
 
   function fitCanvas(canvas, context) {
@@ -41,7 +58,8 @@
     const pad = {l: 43, r: 12, t: 16, b: 31};
     const pw = w - pad.l - pad.r, ph = h - pad.t - pad.b;
     const maxY = Math.max(80, result ? Math.ceil(Math.max(...result.pv, ...result.sp) / 10) * 10 + 10 : 80);
-    const x = i => pad.l + (i / 1000) * pw;
+    const sampleCount = result?.t?.length || 1;
+    const x = i => pad.l + (i / Math.max(1, sampleCount - 1)) * pw;
     const y = v => pad.t + ph - (v / maxY) * ph;
     ctx.font = '10px DM Mono, monospace'; ctx.lineWidth = 1; ctx.strokeStyle = grid; ctx.fillStyle = muted;
     for (let val = 0; val <= maxY; val += 20) {
@@ -98,7 +116,7 @@
     const index = Math.max(0, Math.min(1000, Math.round((xPos - 43) / Math.max(1, rect.width - 55) * 1000)));
     const tip = $('chartTooltip'); tip.hidden = false;
     tip.style.left = Math.max(0, Math.min(rect.width - 140, xPos + 12)) + 'px'; tip.style.top = '12px';
-    tip.innerHTML = `t = ${result.t[index].toFixed(0)}<br>SP = ${result.sp[index].toFixed(1)}<br>PV = ${result.pv[index].toFixed(2)}<br>Output = ${result.op[index].toFixed(1)}%`;
+    tip.textContent = `t = ${result.t[index].toFixed(0)} · SP = ${result.sp[index].toFixed(1)} · PV = ${result.pv[index].toFixed(2)} · Output = ${result.op[index].toFixed(1)}%`;
   });
   chart.addEventListener('mouseleave', () => $('chartTooltip').hidden = true);
 
@@ -121,8 +139,12 @@
     $('sensorKiOut').value = (+sensorKi.value).toFixed(2);
     $('sensorKdOut').value = (+sensorKd.value).toFixed(1);
     const mode = sensorController.value;
-    $('sensorKiGroup').style.opacity = mode === 'PID' ? '1' : '.45';
-    $('sensorKdGroup').style.opacity = mode === 'P' ? '.45' : '1';
+    const kiEnabled = mode === 'PID';
+    const kdEnabled = mode !== 'P';
+    sensorKi.disabled = !kiEnabled;
+    sensorKd.disabled = !kdEnabled;
+    $('sensorKiGroup').style.opacity = kiEnabled ? '1' : '.45';
+    $('sensorKdGroup').style.opacity = kdEnabled ? '1' : '.45';
   }
   function updateSensorReadings(){
     const bars=$('sensorBars').querySelectorAll('i');
@@ -194,11 +216,9 @@
       speed:1.45,max_steps:2200
     };
     try {
-      const response=await fetch(`${API_BASE}/api/sensor-simulate`,{
+      const data=await requestJSON(`${API_BASE}/api/sensor-simulate`,{
         method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)
-      });
-      const data=await response.json();
-      if(!response.ok) throw new Error(data.detail || 'Sensor simulation request failed.');
+      },'Sensor simulation request failed.');
       if(token!==requestToken)return;
       sensorFrames=data.frames || [];
       if(!sensorFrames.length)throw new Error('The backend returned no simulation frames.');
