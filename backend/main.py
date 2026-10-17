@@ -220,21 +220,14 @@ def simulate(request: SimulationRequest):
             frames.append({"x": round(x, 3), "y": round(y, 3), "heading": round(heading, 5),
                            "error": round(error, 4), "cross_track_error": round(distance, 3),
                            "steering": round(steering, 5), "step": step + 1})
-        # Stop when the vehicle has reached the final waypoint. The old check
-        # could miss the endpoint when the vehicle overshot it between steps.
-        reached_endpoint = math.hypot(x - path[-1].x, y - path[-1].y) <= max(end_tolerance, request.speed * 2.5)
-        if reached_endpoint and step > 10:
-            if not frames or frames[-1]["step"] != step + 1:
-                frames.append({"x": round(x, 3), "y": round(y, 3), "heading": round(heading, 5),
-                               "error": round(error, 4), "cross_track_error": round(distance, 3),
-                               "steering": round(steering, 5), "step": step + 1})
+        if math.hypot(x - path[-1].x, y - path[-1].y) <= end_tolerance and step > 10:
             break
     return {"frames": frames, "metrics": {
         "steps": step + 1, "frames": len(frames),
         "mean_absolute_error_px": round(sum(errors) / max(len(errors), 1), 3),
         "max_error_px": round(max(errors, default=0.0), 3),
         "lost_track_steps": lost_steps,
-        "reached_endpoint": math.hypot(x - path[-1].x, y - path[-1].y) <= max(end_tolerance, request.speed * 2.5),
+        "reached_endpoint": math.hypot(x - path[-1].x, y - path[-1].y) <= end_tolerance,
     }, "pid": request.pid.model_dump()}
 
 
@@ -303,21 +296,16 @@ def sensor_simulate(request: SensorSimulationRequest):
         previous_error = error
         if not any(detected):
             lost_line_steps += 1
-        # Keep the endpoint check independent of sensor detection: the vehicle
-        # should stop at the drawn path's end instead of driving until canvas edge.
-        endpoint_distance_px = math.hypot((x - path[-1].x) * width, (y - path[-1].y) * height)
-        reached_endpoint = endpoint_distance_px <= 15.0 and step > 8
-        frames.append({"x": round(x, 6), "y": round(y, 6), "heading": round(heading, 5),
-                       "error": round(error, 4), "sensors": detected, "steering": round(steering, 5),
-                       "step": step + 1})
-        if reached_endpoint or x < -0.02 or x > 1.02 or y < -0.02 or y > 1.02:
+        if step % 1 == 0:
+            frames.append({"x": round(x, 6), "y": round(y, 6), "heading": round(heading, 5),
+                           "error": round(error, 4), "sensors": detected, "steering": round(steering, 5),
+                           "step": step + 1})
+        if x < -0.02 or x > 1.02 or y < -0.02 or y > 1.02:
             break
 
     return {"sensor_model": request.sensor_model, "controller": request.controller,
             "pid": request.pid.model_dump(), "frames": frames,
             "metrics": {"steps": len(frames), "frames": len(frames), "lost_line_steps": lost_line_steps,
-                        "reached_endpoint": bool(frames and math.hypot((frames[-1]["x"] - path[-1].x) * width,
-                                                                        (frames[-1]["y"] - path[-1].y) * height) <= 15.0),
                         "stopped_at_boundary": bool(frames and (frames[-1]["x"] < -0.02 or frames[-1]["x"] > 1.02 or frames[-1]["y"] < -0.02 or frames[-1]["y"] > 1.02))}}
 
 
