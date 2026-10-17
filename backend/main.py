@@ -7,6 +7,10 @@ from __future__ import annotations
 
 import math
 from typing import Literal
+from pathlib import Path
+
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -148,6 +152,10 @@ def _point_segment_distance(px, py, ax, ay, bx, by):
 
 @app.get("/")
 def root():
+    """Serve the frontend on the same origin in production, when available."""
+    index_file = Path(__file__).resolve().parent.parent / "frontend" / "index.html"
+    if index_file.is_file():
+        return FileResponse(index_file)
     return {"name": "LineFollower PID API", "status": "ok", "docs": "/docs"}
 
 
@@ -367,3 +375,10 @@ def pid_process(request: ProcessPIDRequest):
         "model": {"process_gain": process_gain, "time_constant": tau_p,
                   "dead_time": delay, "nominal_value": 23.0}
     }
+
+
+# Serve CSS and JavaScript from the same Render service as the API. This keeps
+# API_BASE=location.origin valid for the recommended single-service deployment.
+_FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
+if _FRONTEND_DIR.is_dir():
+    app.mount("/", StaticFiles(directory=_FRONTEND_DIR, html=True), name="frontend")
