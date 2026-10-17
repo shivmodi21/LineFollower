@@ -97,7 +97,7 @@
         const sampleCount = data?.t?.length || 1;
         const x = i => pad.l + (i / Math.max(1, sampleCount - 1)) * pw;
         const y = v => pad.t + ph - (v / maxY) * ph;
-        context.font = '10px DM Mono, monospace';
+        context.font = '11px DM Mono, monospace';
         context.lineWidth = 1;
         context.strokeStyle = grid;
         context.fillStyle = muted;
@@ -354,7 +354,7 @@
         context.fillStyle = '#0d1525'; context.fillRect(0, 0, w, h);
         const left = 42, right = 12, top = 14, bottom = 28;
         const plotW = w - left - right, plotH = h - top - bottom;
-        context.font = '10px "DM Mono", monospace'; context.fillStyle = '#9aa8bf';
+        context.font = '11px "DM Mono", monospace'; context.fillStyle = '#9aa8bf';
         context.strokeStyle = '#273149'; context.lineWidth = 1;
         for (let i = 0; i <= 4; i++) {
             const y = top + plotH * i / 4;
