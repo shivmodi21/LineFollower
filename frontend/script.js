@@ -84,12 +84,17 @@
         };
     }
 
-    function drawChart() {
+    const linePidChart = $('linePidChart');
+    const linePidCtx = linePidChart?.getContext('2d');
+    let linePidResult = null;
+
+    function drawResponseChart(canvas, context, data) {
+        if (!canvas || !context) return;
         const {
             w,
             h
-        } = fitCanvas(chart, ctx);
-        ctx.clearRect(0, 0, w, h);
+        } = fitCanvas(canvas, context);
+        context.clearRect(0, 0, w, h);
         const pad = {
             l: 43,
             r: 12,
@@ -98,53 +103,102 @@
         };
         const pw = w - pad.l - pad.r,
             ph = h - pad.t - pad.b;
-        const maxY = Math.max(80, result ? Math.ceil(Math.max(...result.pv, ...result.sp) / 10) * 10 + 10 : 80);
-        const sampleCount = result?.t?.length || 1;
+        const maxY = Math.max(80, data ? Math.ceil(Math.max(...data.pv, ...data.sp) / 10) * 10 + 10 : 80);
+        const sampleCount = data?.t?.length || 1;
         const x = i => pad.l + (i / Math.max(1, sampleCount - 1)) * pw;
         const y = v => pad.t + ph - (v / maxY) * ph;
-        ctx.font = '10px DM Mono, monospace';
-        ctx.lineWidth = 1;
-        ctx.strokeStyle = grid;
-        ctx.fillStyle = muted;
+        context.font = '10px DM Mono, monospace';
+        context.lineWidth = 1;
+        context.strokeStyle = grid;
+        context.fillStyle = muted;
         for (let val = 0; val <= maxY; val += 20) {
-            ctx.beginPath();
-            ctx.moveTo(pad.l, y(val));
-            ctx.lineTo(w - pad.r, y(val));
-            ctx.stroke();
-            ctx.textAlign = 'right';
-            ctx.textBaseline = 'middle';
-            ctx.fillText(String(val), pad.l - 9, y(val));
+            context.beginPath();
+            context.moveTo(pad.l, y(val));
+            context.lineTo(w - pad.r, y(val));
+            context.stroke();
+            context.textAlign = 'right';
+            context.textBaseline = 'middle';
+            context.fillText(String(val), pad.l - 9, y(val));
         }
         for (let i = 0; i <= 5; i++) {
             const xx = pad.l + pw * i / 5;
-            ctx.beginPath();
-            ctx.moveTo(xx, pad.t);
-            ctx.lineTo(xx, pad.t + ph);
-            ctx.stroke();
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'top';
-            ctx.fillText(String(i * 200), xx, pad.t + ph + 9);
+            context.beginPath();
+            context.moveTo(xx, pad.t);
+            context.lineTo(xx, pad.t + ph);
+            context.stroke();
+            context.textAlign = 'center';
+            context.textBaseline = 'top';
+            context.fillText(String(i * 200), xx, pad.t + ph + 9);
         }
-        ctx.fillStyle = muted;
-        ctx.textAlign = 'left';
-        ctx.textBaseline = 'top';
-        ctx.fillText('OUTPUT', pad.l, 0);
-        ctx.textAlign = 'right';
-        ctx.fillText('TIME', w - pad.r, h - 10);
-        if (!result) return;
+        context.fillStyle = muted;
+        context.textAlign = 'left';
+        context.textBaseline = 'top';
+        context.fillText('OUTPUT', pad.l, 0);
+        context.textAlign = 'right';
+        context.fillText('TIME', w - pad.r, h - 10);
+        if (!data) return;
         const drawLine = (values, color, width, dash = []) => {
-            ctx.beginPath();
-            ctx.strokeStyle = color;
-            ctx.lineWidth = width;
-            ctx.setLineDash(dash);
-            values.forEach((v, i) => i ? ctx.lineTo(x(i), y(v)) : ctx.moveTo(x(i), y(v)));
-            ctx.stroke();
-            ctx.setLineDash([]);
+            context.beginPath();
+            context.strokeStyle = color;
+            context.lineWidth = width;
+            context.setLineDash(dash);
+            values.forEach((v, i) => i ? context.lineTo(x(i), y(v)) : context.moveTo(x(i), y(v)));
+            context.stroke();
+            context.setLineDash([]);
         };
-        drawLine(result.sp, '#929db5', 1.5, [5, 5]);
-        drawLine(result.pv, mint, 2.4);
-        const opScaled = result.op.map(v => v * maxY / 100);
+        drawLine(data.sp, '#929db5', 1.5, [5, 5]);
+        drawLine(data.pv, mint, 2.4);
+        const opScaled = data.op.map(v => v * maxY / 100);
         drawLine(opScaled, orange, 1.2, [3, 4]);
+    }
+
+    function drawChart() {
+        drawResponseChart(chart, ctx, result);
+    }
+
+    function drawLinePidChart() {
+        drawResponseChart(linePidChart, linePidCtx, linePidResult);
+    }
+
+    function renderLinePidMetrics() {
+        if (!linePidResult) return;
+        $('linePidIae').textContent = linePidResult.iae.toLocaleString(undefined, {
+            maximumFractionDigits: 1
+        });
+        $('linePidOvershoot').textContent = linePidResult.overshoot.toFixed(1) + '%';
+        $('linePidSettling').textContent = linePidResult.settling == null ? 'Not settled' : Math.round(linePidResult.settling) + ' s';
+        $('linePidSampleCount').textContent = linePidResult.t.length + ' samples';
+    }
+
+    function readLinePidSettings() {
+        const controller = sensorController.value;
+        return {
+            kc: controller === 'PID Ratio' ? +sensorRatio.value : +sensorKp.value,
+            ti: +sensorTi.value,
+            td: +sensorTd.value,
+            target: +$('lineTarget').value,
+            controller
+        };
+    }
+
+    async function runLinePidSimulation() {
+        $('lineTargetOut').value = $('lineTarget').value;
+        $('animateRobot').disabled = true;
+        $('linePidRunStatus').textContent = 'CALCULATING…';
+        try {
+            linePidResult = await simulate(readLinePidSettings());
+            drawLinePidChart();
+            renderLinePidMetrics();
+            $('linePidRunStatus').textContent = 'SIMULATION COMPLETE';
+        } catch (error) {
+            $('linePidRunStatus').textContent = 'API ERROR';
+            $('linePidIae').textContent = '—';
+            $('linePidOvershoot').textContent = '—';
+            $('linePidSettling').textContent = '—';
+            $('linePidSampleCount').textContent = error.message || 'Could not reach API';
+        } finally {
+            if (environmentMode === 'pid') $('animateRobot').disabled = false;
+        }
     }
 
     function renderMetrics() {
@@ -270,7 +324,8 @@
     const API_BASE = (location.protocol === 'file:' || ['localhost', '127.0.0.1'].includes(location.hostname)) ?
         'http://127.0.0.1:8000' : location.origin;
 
-    let environmentMode = 'sensor';
+    let environmentMode = 'pid';
+    const lineTarget = $('lineTarget');
     let telemetryHistory = [];
     let lastSimulationMetrics = {};
 
@@ -292,35 +347,59 @@
         $('sensorTiOut').value = sensorTi.value;
         $('sensorTdOut').value = (+sensorTd.value).toFixed(1);
         $('sensorRatioOut').value = (+sensorRatio.value).toFixed(1);
-        const mode = sensorController.value;
-        $('sensorTiGroup').hidden = mode !== 'PID';
-        $('sensorTdGroup').hidden = !(mode === 'PD' || mode === 'PID');
-        $('ratioGroup').hidden = mode !== 'PID Ratio';
-        $('kpGroup').hidden = mode === 'PID Ratio';
+        $('lineTargetOut').value = lineTarget.value;
+        const controllerMode = sensorController.value;
+        $('sensorTiGroup').hidden = controllerMode !== 'PID';
+        $('sensorTdGroup').hidden = !(controllerMode === 'PD' || controllerMode === 'PID');
+        $('ratioGroup').hidden = controllerMode !== 'PID Ratio';
+        $('kpGroup').hidden = controllerMode === 'PID Ratio';
         const hints = {
-            P: 'P reacts to current error only.',
-            PD: 'PD reacts to current error and its rate of change. Tau_D controls derivative time.',
+            P: 'P reacts to current error only. Increase Kp for a faster response; too much can cause overshoot or oscillation.',
+            PD: 'PD adds damping via Tau_D. Useful when proportional action alone overshoots or hunts.',
             PID: 'PID combines current, accumulated, and changing error. Tau_I and Tau_D control integral and derivative time constants.',
-            'PID Ratio': 'PID Ratio reproduces the ratio-style steering used in the source scripts: a single gain scales the sensor error.'
+            'PID Ratio': 'PID Ratio uses a single gain on error—the same ratio-style control used in the line-following scripts.'
         };
-        $('controllerHint').textContent = hints[mode];
+        const modeNote = environmentMode === 'pid'
+            ? ' Switch to Sensor or Path mode to run the line follower with these settings.'
+            : '';
+        $('controllerHint').textContent = hints[controllerMode] + modeNote;
+        if (environmentMode === 'pid') $('linePidRunStatus').textContent = 'PARAMETERS CHANGED';
     }
 
     function setEnvironment(mode) {
         environmentMode = mode;
+        const pid = mode === 'pid';
         const sensor = mode === 'sensor';
+        $('pidEnvironmentTab').classList.toggle('active', pid);
         $('sensorEnvironmentTab').classList.toggle('active', sensor);
-        $('pathEnvironmentTab').classList.toggle('active', !sensor);
+        $('pathEnvironmentTab').classList.toggle('active', mode === 'path');
+        $('pidEnvironmentTab').setAttribute('aria-selected', String(pid));
         $('sensorEnvironmentTab').setAttribute('aria-selected', String(sensor));
-        $('pathEnvironmentTab').setAttribute('aria-selected', String(!sensor));
+        $('pathEnvironmentTab').setAttribute('aria-selected', String(mode === 'path'));
+        $('pidTuningView').hidden = !pid;
+        $('trackSimulationView').hidden = pid;
+        $('lineTelemetryPanel').hidden = pid;
         $('sensorModelGroup').hidden = !sensor;
-        $('environmentTitle').textContent = sensor ? 'Sensor based control' : 'Path-aware control';
-        $('environmentDescription').textContent = sensor
-            ? 'The vehicle only sees the line through its sensors. If all sensors lose the line, it cannot directly calculate its distance from the track.'
-            : 'The vehicle knows the track geometry. It estimates cross-track error and can steer back toward the nearest point on the path even after drifting away.';
-        $('sensorReadoutLabel').textContent = sensor ? `SENSOR ARRAY · ${sensorWeights[sensorModel.value].length}` : 'PATH GEOMETRY';
-        resetSensorRobot();
-        drawTelemetryChart();
+        $('pidTargetGroup').hidden = !pid;
+        if (pid) {
+            $('environmentTitle').textContent = 'PID tuning';
+            $('environmentDescription').textContent = 'Adjust proportional, integral, and derivative action against a first-order process with dead time. When the response looks good, switch to sensor or path mode and run the line follower with the same gains.';
+            $('animateRobot').innerHTML = 'Run simulation <i class="fa-solid fa-play" aria-hidden="true"></i>';
+            $('animateRobot').disabled = false;
+            updateSensorGains();
+            drawLinePidChart();
+        } else if (sensor) {
+            $('environmentTitle').textContent = 'Sensor based control';
+            $('environmentDescription').textContent = 'The vehicle only sees the line through its sensors. If all sensors lose the line, it cannot directly calculate its distance from the track.';
+            resetSensorRobot();
+            drawTelemetryChart();
+        } else {
+            $('environmentTitle').textContent = 'Path-aware control';
+            $('environmentDescription').textContent = 'The vehicle knows the track geometry. It estimates cross-track error and can steer back toward the nearest point on the path even after drifting away.';
+            resetSensorRobot();
+            drawTelemetryChart();
+        }
+        updateSensorGains();
     }
 
     function updateSensorReadings() {
@@ -510,8 +589,10 @@
             };
             $('robotState').textContent = drawingEnabled ? 'DRAW MODE' : 'NO TRACK';
         }
-        $('animateRobot').disabled = drawingEnabled || path.length < 2;
-        $('animateRobot').innerHTML = 'Run simulation <i class="fa-solid fa-play" aria-hidden="true"></i>';
+        $('animateRobot').disabled = environmentMode === 'pid' ? false : (drawingEnabled || path.length < 2);
+        if (environmentMode !== 'pid') {
+            $('animateRobot').innerHTML = 'Run simulation <i class="fa-solid fa-play" aria-hidden="true"></i>';
+        }
         updateSensorReadings();
         drawTrack();
         drawTelemetryChart();
@@ -703,10 +784,29 @@
         $('drawHint').textContent = 'Track cleared. Choose “Draw track” and draw a path before running the robot.';
         resetSensorRobot();
     });
-    $('animateRobot').addEventListener('click', runSensorSimulation);
-    $('resetRobot').addEventListener('click', resetSensorRobot);
-    [sensorKp, sensorTi, sensorTd, sensorRatio].forEach(el => el.addEventListener('input', updateSensorGains));
+    function runLineFollowerAction() {
+        if (environmentMode === 'pid') runLinePidSimulation();
+        else runSensorSimulation();
+    }
+
+    function resetLineFollower() {
+        if (environmentMode === 'pid') {
+            sensorKp.value = 5;
+            sensorTi.value = 60;
+            sensorTd.value = 7;
+            lineTarget.value = 60;
+            updateSensorGains();
+            runLinePidSimulation();
+            return;
+        }
+        resetSensorRobot();
+    }
+
+    $('animateRobot').addEventListener('click', runLineFollowerAction);
+    $('resetRobot').addEventListener('click', resetLineFollower);
+    [sensorKp, sensorTi, sensorTd, sensorRatio, lineTarget].forEach(el => el.addEventListener('input', updateSensorGains));
     sensorController.addEventListener('change', updateSensorGains);
+    $('pidEnvironmentTab').addEventListener('click', () => setEnvironment('pid'));
     $('sensorEnvironmentTab').addEventListener('click', () => setEnvironment('sensor'));
     $('pathEnvironmentTab').addEventListener('click', () => setEnvironment('path'));
     sensorModel.addEventListener('change', () => {
@@ -716,20 +816,43 @@
         updateSensorReadings();
         drawTrack();
     });
+    linePidChart?.addEventListener('mousemove', event => {
+        if (!linePidResult) return;
+        const rect = linePidChart.getBoundingClientRect(),
+            xPos = event.clientX - rect.left;
+        const index = Math.max(0, Math.min(1000, Math.round((xPos - 43) / Math.max(1, rect.width - 55) * 1000)));
+        const tip = $('linePidTooltip');
+        tip.hidden = false;
+        tip.style.left = Math.max(0, Math.min(rect.width - 140, xPos + 12)) + 'px';
+        tip.style.top = '12px';
+        tip.textContent = `t = ${linePidResult.t[index].toFixed(0)} · SP = ${linePidResult.sp[index].toFixed(1)} · PV = ${linePidResult.pv[index].toFixed(2)} · Output = ${linePidResult.op[index].toFixed(1)}%`;
+    });
+    linePidChart?.addEventListener('mouseleave', () => {
+        $('linePidTooltip').hidden = true;
+    });
+
     if ('ResizeObserver' in window) {
-        new ResizeObserver(() => {
+        const redrawCharts = () => {
             drawChart();
+            drawLinePidChart();
             drawTrack();
             drawTelemetryChart();
-        }).observe(chart.parentElement);
+        };
+        new ResizeObserver(redrawCharts).observe(chart.parentElement);
+        if (linePidChart?.parentElement) new ResizeObserver(redrawCharts).observe(linePidChart.parentElement);
     } else window.addEventListener('resize', () => {
         drawChart();
+        drawLinePidChart();
         drawTrack();
         drawTelemetryChart();
     });
     updateOutputs();
     runSimulation();
     updateSensorGains();
-    setEnvironment('sensor');
-    resetSensorRobot();
+    setEnvironment('pid');
+    runLinePidSimulation();
+    if (path.length >= 2) {
+        const a = path[0], b = path[1];
+        robot.heading = Math.atan2((b.y - a.y) * track.height, (b.x - a.x) * track.width);
+    }
 })();

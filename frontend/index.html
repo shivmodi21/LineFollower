@@ -193,11 +193,14 @@
                         <div class="eyebrow">02 / APPLICATION</div>
                         <h2>Line-following simulator</h2>
                     </div>
-                    <p>Compare sensor-only steering with path-aware recovery using the same track and vehicle drawing area.</p>
+                    <p>Tune PID on a step response, then apply the same gains on the shared track in sensor or path-aware mode.</p>
                 </div>
 
                 <div class="environment-tabs" role="tablist" aria-label="Simulation environment">
-                    <button id="sensorEnvironmentTab" class="environment-tab active" type="button" role="tab" aria-selected="true" data-environment="sensor">
+                    <button id="pidEnvironmentTab" class="environment-tab active" type="button" role="tab" aria-selected="true" data-environment="pid">
+                        <i class="fa-solid fa-sliders" aria-hidden="true"></i><span>PID Tuning</span><small>Step response on a process model</small>
+                    </button>
+                    <button id="sensorEnvironmentTab" class="environment-tab" type="button" role="tab" aria-selected="false" data-environment="sensor">
                         <i class="fa-solid fa-eye" aria-hidden="true"></i><span>Sensor Based</span><small>React to sensor readings</small>
                     </button>
                     <button id="pathEnvironmentTab" class="environment-tab" type="button" role="tab" aria-selected="false" data-environment="path">
@@ -208,19 +211,20 @@
                 <div class="line-layout panel">
                     <aside class="line-copy environment-controls">
                         <span class="panel-kicker">CONTROLLER SETTINGS</span>
-                        <h3 id="environmentTitle">Sensor based control</h3>
-                        <p id="environmentDescription">The vehicle only sees the line through its sensors. When all sensors lose the line, it cannot directly calculate its distance from the track.</p>
+                        <h3 id="environmentTitle">PID tuning</h3>
+                        <p id="environmentDescription">Adjust proportional, integral, and derivative action against a first-order process with dead time. When the response looks good, switch to sensor or path mode and run the line follower with the same gains.</p>
 
-                        <div class="sensor-controls">
-                            <div class="control-field" id="sensorModelGroup">
+                        <div class="sensor-controls line-controller-controls">
+                            <div class="control-field" id="sensorModelGroup" hidden>
                                 <label for="sensorModel">Sensor configuration</label>
                                 <select id="sensorModel">
                                     <option value="2">Two sensors</option>
                                     <option value="5">Five sensors</option>
                                     <option value="7" selected>Seven sensors</option>
                                 </select>
+                                <p class="control-hint">More sensors give finer lateral error estimates; fewer sensors behave like the minimal setups in the original scripts.</p>
                             </div>
-                            <div class="control-field">
+                            <div class="control-field" id="controllerFieldGroup">
                                 <label for="sensorController">Controller</label>
                                 <select id="sensorController">
                                     <option value="P">P</option>
@@ -229,23 +233,47 @@
                                     <option value="PID Ratio">PID Ratio</option>
                                 </select>
                             </div>
-                            <div class="sensor-gain" id="kpGroup">
-                                <label for="sensorKp">Kp <output id="sensorKpOut">5.0</output></label>
-                                <input id="sensorKp" type="range" min="0" max="12" step="0.1" value="5">
+                            <div class="control-group compact-control" id="kpGroup">
+                                <div class="range-title">
+                                    <label for="sensorKp">Proportional gain <span class="symbol">K<sub>p</sub></span></label><output id="sensorKpOut" for="sensorKp">5.0</output>
+                                </div>
+                                <input id="sensorKp" type="range" min="0.1" max="15" step="0.1" value="5">
+                                <div class="range-ends"><span>Gentle</span><span>Responsive</span></div>
+                                <p class="control-hint">Sets how strongly steering reacts to the current tracking error.</p>
                             </div>
-                            <div class="sensor-gain tau-control" id="sensorTiGroup">
-                                <label for="sensorTi">Tau_I <output id="sensorTiOut">60</output></label>
+                            <div class="control-group compact-control" id="sensorTiGroup">
+                                <div class="range-title">
+                                    <label for="sensorTi">Integral time <span class="symbol">τ<sub>I</sub></span></label><output id="sensorTiOut" for="sensorTi">60</output>
+                                </div>
                                 <input id="sensorTi" type="range" min="5" max="180" step="1" value="60">
+                                <div class="range-ends"><span>Faster accumulation</span><span>Slower</span></div>
+                                <p class="control-hint">Accumulates past error to remove persistent offset on the line.</p>
                             </div>
-                            <div class="sensor-gain tau-control" id="sensorTdGroup">
-                                <label for="sensorTd">Tau_D <output id="sensorTdOut">7</output></label>
+                            <div class="control-group compact-control" id="sensorTdGroup">
+                                <div class="range-title">
+                                    <label for="sensorTd">Derivative time <span class="symbol">τ<sub>D</sub></span></label><output id="sensorTdOut" for="sensorTd">7</output>
+                                </div>
                                 <input id="sensorTd" type="range" min="0" max="30" step="0.5" value="7">
+                                <div class="range-ends"><span>None</span><span>More damping</span></div>
+                                <p class="control-hint">Responds to how quickly error is changing, which can reduce overshoot.</p>
                             </div>
-                            <div class="sensor-gain" id="ratioGroup" hidden>
-                                <label for="sensorRatio">PID ratio <output id="sensorRatioOut">5.0</output></label>
+                            <div class="control-group compact-control" id="ratioGroup" hidden>
+                                <div class="range-title">
+                                    <label for="sensorRatio">PID ratio</label><output id="sensorRatioOut" for="sensorRatio">5.0</output>
+                                </div>
                                 <input id="sensorRatio" type="range" min="0" max="12" step="0.1" value="5">
+                                <div class="range-ends"><span>Weak steering</span><span>Strong steering</span></div>
+                                <p class="control-hint">Single gain scaling sensor error, matching the ratio-style controllers in the source scripts.</p>
                             </div>
-                            <p class="control-hint" id="controllerHint">PID combines current, accumulated, and changing error. Tau_I and Tau_D control the integral and derivative time constants.</p>
+                            <div class="control-group compact-control setpoint-group" id="pidTargetGroup">
+                                <div class="range-title">
+                                    <label for="lineTarget">Target setpoint</label><output id="lineTargetOut" for="lineTarget">60</output>
+                                </div>
+                                <input id="lineTarget" type="range" min="25" max="80" step="1" value="60">
+                                <div class="range-ends"><span>Lower target</span><span>Higher target</span></div>
+                                <p class="control-hint">Final process value for the step-response experiment (setpoint in the plot).</p>
+                            </div>
+                            <p class="control-hint environment-hint" id="controllerHint">Full PID combines current, accumulated, and changing error. Tau_I and Tau_D shape integral and derivative action.</p>
                         </div>
 
                         <div class="line-actions">
@@ -255,36 +283,63 @@
                         <p class="panel-note"><i class="fa-solid fa-circle-info" aria-hidden="true"></i> Numerical simulation inspired by the supplied Pygame implementations; not a hardware controller.</p>
                     </aside>
 
-                    <div class="track-wrap">
-                        <div class="track-label"><span>SHARED DRAWING AREA</span><span id="robotState">READY</span></div>
-                        <div class="track-tools">
-                            <button id="drawTrackBtn" class="button secondary" type="button"><i class="fa-solid fa-pencil" aria-hidden="true"></i> Draw track</button>
-                            <button id="exampleTrackBtn" class="button secondary" type="button">Example track</button>
-                            <button id="clearTrackBtn" class="button secondary" type="button">Clear track</button>
+                    <div class="line-visual-column">
+                        <div class="track-wrap">
+                            <div id="trackSimulationView" class="track-simulation-view" hidden>
+                                <div class="track-label"><span>SHARED DRAWING AREA</span><span id="robotState">READY</span></div>
+                                <div class="track-tools">
+                                    <button id="drawTrackBtn" class="button secondary" type="button"><i class="fa-solid fa-pencil" aria-hidden="true"></i> Draw track</button>
+                                    <button id="exampleTrackBtn" class="button secondary" type="button">Example track</button>
+                                    <button id="clearTrackBtn" class="button secondary" type="button">Clear track</button>
+                                </div>
+                                <p id="drawHint" class="draw-hint">Choose “Draw track”, drag on the canvas, then select “Finish drawing”.</p>
+                                <canvas id="trackCanvas" role="img" aria-label="Line-following simulation canvas with a vehicle and drawn track"></canvas>
+                                <div class="sensor-readout">
+                                    <span id="sensorReadoutLabel">SENSOR ARRAY · 7</span>
+                                    <div id="sensorBars" class="sensor-bars"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+                                    <span id="errorReadout">ERROR: 0.00</span>
+                                </div>
+                            </div>
+                            <div id="pidTuningView" class="pid-tuning-view">
+                                <div class="panel-heading chart-heading pid-chart-heading">
+                                    <div>
+                                        <span class="panel-kicker">PROCESS OUTPUT</span>
+                                        <h3>Setpoint vs. process variable</h3>
+                                    </div>
+                                    <span class="running-label"><i class="status-dot"></i><span id="linePidRunStatus">READY TO RUN</span></span>
+                                </div>
+                                <div class="chart-wrap line-pid-chart-wrap">
+                                    <canvas id="linePidChart" aria-label="PID step response graph for line follower tuning" role="img"></canvas>
+                                    <div id="linePidTooltip" class="chart-tooltip" hidden></div>
+                                </div>
+                                <div class="chart-key">
+                                    <span><i class="legend-line mint"></i> Process variable (PV)</span><span><i class="legend-line dashed"></i> Setpoint (SP)</span><span><i class="legend-line orange"></i> Control output (scaled)</span>
+                                </div>
+                                <div class="metrics-grid line-pid-metrics">
+                                    <div class="metric"><span>Integral absolute error</span><strong id="linePidIae">—</strong><small>Lower is generally better</small></div>
+                                    <div class="metric"><span>Peak overshoot</span><strong id="linePidOvershoot">—</strong><small>Above target</small></div>
+                                    <div class="metric"><span>Settling time</span><strong id="linePidSettling">—</strong><small>Approx. within ±2%</small></div>
+                                </div>
+                                <div class="chart-footer">
+                                    <span>MODEL: FIRST-ORDER PROCESS + DEAD TIME</span><span id="linePidSampleCount">—</span>
+                                </div>
+                            </div>
                         </div>
-                        <p id="drawHint" class="draw-hint">Choose “Draw track”, drag on the canvas, then select “Finish drawing”.</p>
-                        <canvas id="trackCanvas" role="img" aria-label="Line-following simulation canvas with a vehicle and drawn track"></canvas>
-                        <div class="sensor-readout">
-                            <span id="sensorReadoutLabel">SENSOR ARRAY · 7</span>
-                            <div id="sensorBars" class="sensor-bars"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
-                            <span id="errorReadout">ERROR: 0.00</span>
+                        <div class="line-telemetry" id="lineTelemetryPanel">
+                            <div class="panel-heading chart-heading line-telemetry-heading">
+                                <div><span class="panel-kicker">LIVE TELEMETRY</span><h3>Tracking error and control output</h3></div>
+                                <span class="running-label"><i class="status-dot"></i><span id="linePlotStatus">READY TO RUN</span></span>
+                            </div>
+                            <div class="line-metrics-grid">
+                                <div class="metric"><span>Current tracking error</span><strong id="lineErrorMetric">—</strong><small>Sensor or cross-track error</small></div>
+                                <div class="metric"><span>Control output</span><strong id="lineOutputMetric">—</strong><small>Steering command</small></div>
+                                <div class="metric"><span>Steps simulated</span><strong id="lineStepsMetric">0</strong><small>Frames calculated</small></div>
+                                <div class="metric"><span>Lost line / track</span><strong id="lineLostMetric">0</strong><small>Steps without reliable tracking</small></div>
+                            </div>
+                            <div class="line-plot-wrap"><canvas id="lineTelemetryChart" role="img" aria-label="Live chart of tracking error and steering output"></canvas></div>
+                            <div class="chart-key"><span><i class="legend-line mint"></i> Tracking error</span><span><i class="legend-line orange"></i> Control output / steering</span></div>
                         </div>
                     </div>
-                </div>
-
-                <div class="line-telemetry panel">
-                    <div class="panel-heading chart-heading">
-                        <div><span class="panel-kicker">LIVE TELEMETRY</span><h3>Tracking error and control output</h3></div>
-                        <span class="running-label"><i class="status-dot"></i><span id="linePlotStatus">READY TO RUN</span></span>
-                    </div>
-                    <div class="line-metrics-grid">
-                        <div class="metric"><span>Current tracking error</span><strong id="lineErrorMetric">—</strong><small>Sensor or cross-track error</small></div>
-                        <div class="metric"><span>Control output</span><strong id="lineOutputMetric">—</strong><small>Steering command</small></div>
-                        <div class="metric"><span>Steps simulated</span><strong id="lineStepsMetric">0</strong><small>Frames calculated</small></div>
-                        <div class="metric"><span>Lost line / track</span><strong id="lineLostMetric">0</strong><small>Steps without reliable tracking</small></div>
-                    </div>
-                    <div class="line-plot-wrap"><canvas id="lineTelemetryChart" role="img" aria-label="Live chart of tracking error and steering output"></canvas></div>
-                    <div class="chart-key"><span><i class="legend-line mint"></i> Tracking error</span><span><i class="legend-line orange"></i> Control output / steering</span></div>
                 </div>
             </section>
 

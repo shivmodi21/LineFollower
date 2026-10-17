@@ -90,6 +90,7 @@ class ProcessPIDRequest(BaseModel):
     ti: float = Field(default=60.0, ge=5.0, le=180.0)
     td: float = Field(default=7.0, ge=0.0, le=30.0)
     target: float = Field(default=60.0, ge=25.0, le=80.0)
+    controller: Literal["P", "PD", "PID", "PID Ratio"] = "PID"
     samples: int = Field(default=1001, ge=101, le=2001)
 
 
@@ -350,9 +351,20 @@ def pid_process(request: ProcessPIDRequest):
         error = request.target - y
         iae += abs(error) * dt
         p = request.kc * error
-        d = -request.kc * request.td * ((y - previous_pv) / dt)
-        proposed_integral = integral + (request.kc / request.ti) * error * dt
-        output = p + proposed_integral + d
+        d = (
+            -request.kc * request.td * ((y - previous_pv) / dt)
+            if request.controller in ("PD", "PID")
+            else 0.0
+        )
+        if request.controller == "PID":
+            proposed_integral = integral + (request.kc / request.ti) * error * dt
+            output = p + proposed_integral + d
+        elif request.controller in ("P", "PID Ratio"):
+            proposed_integral = integral
+            output = p
+        else:
+            proposed_integral = integral
+            output = p + d
         if output > 100.0:
             output = 100.0
         elif output < 0.0:
