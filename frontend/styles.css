@@ -12,7 +12,8 @@
     --blue: #8eaaff;
     --font: 'DM Sans', sans-serif;
     --display: 'Space Grotesk', sans-serif;
-    --mono: 'DM Mono', monospace
+    --mono: 'DM Mono', monospace;
+    --layout-max: 1360px
 }
 
 * {
@@ -42,13 +43,13 @@ button, input {
 }
 
 .section-wrap {
-    width: min(1160px, calc(100% - 48px));
+    width: min(var(--layout-max), calc(100% - 48px));
     margin-inline: auto
 }
 
 .topbar {
     height: 76px;
-    padding: 0 max(24px, calc((100vw - 1160px)/2));
+    padding: 0 max(24px, calc((100vw - var(--layout-max)) / 2));
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -576,7 +577,7 @@ input[type=range]::-moz-range-thumb {
 
 .line-layout {
     display: grid;
-    grid-template-columns: 330px minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
     align-items: stretch;
     overflow: hidden
 }
@@ -638,19 +639,21 @@ input[type=range]::-moz-range-thumb {
 }
 
 .track-wrap {
-    flex: 1 1 auto;
-    display: flex;
-    flex-direction: column;
-    min-height: 0;
+    flex: 0 0 auto;
     padding: 18px 20px 14px;
     min-width: 0
 }
 
 .track-simulation-view {
-    display: flex;
-    flex-direction: column;
-    flex: 1 1 auto;
-    min-height: 0
+    display: block
+}
+
+.track-canvas-wrap {
+    height: 320px;
+    min-height: 320px;
+    max-height: 320px;
+    width: 100%;
+    position: relative
 }
 
 .pid-tuning-view {
@@ -672,9 +675,8 @@ input[type=range]::-moz-range-thumb {
 
 #trackCanvas {
     width: 100%;
-    flex: 1 1 auto;
-    min-height: 200px;
-    height: auto;
+    height: 100%;
+    min-height: 0;
     display: block;
     border: 1px solid #26324a;
     border-radius: 8px;
@@ -1051,8 +1053,10 @@ input[type=range]::-moz-range-thumb {
         padding: 12px
     }
 
-    #trackCanvas {
-        height: 245px
+    .track-canvas-wrap {
+        height: 260px;
+        min-height: 260px;
+        max-height: 260px
     }
 
     .sensor-readout {
@@ -1230,4 +1234,4 @@ input[type=range]::-moz-range-thumb {
 .line-telemetry .chart-key{padding:8px 0 0;font-size:9px}
 @media(max-width:900px){.line-metrics-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.line-layout{grid-template-columns:1fr}.line-visual-column{border-left:0;border-top:1px solid var(--border)}}
 @media(max-width:900px){.environment-tabs{grid-template-columns:1fr}}
-@media(max-width:560px){.environment-tabs{gap:8px}.environment-tab{padding:12px;grid-template-columns:22px 1fr;column-gap:7px}.environment-tab span{font-size:13px}.environment-tab small{font-size:9px}.line-telemetry{padding:14px 16px}.line-metrics-grid{gap:8px}.line-metrics-grid .metric{padding:10px 12px}.line-metrics-grid .metric strong{font-size:16px}.line-plot-wrap{height:150px}.line-actions{flex-wrap:wrap}.line-pid-chart-wrap{height:220px;min-height:220px;max-height:220px}}
+@media(max-width:560px){.environment-tabs{gap:8px}.environment-tab{padding:12px;grid-template-columns:22px 1fr;column-gap:7px}.environment-tab span{font-size:13px}.environment-tab small{font-size:9px}.line-telemetry{padding:14px 16px}.line-metrics-grid{gap:8px}.line-metrics-grid .metric{padding:10px 12px}.line-metrics-grid .metric strong{font-size:16px}.line-plot-wrap{height:150px}.line-actions{flex-wrap:wrap}.line-pid-chart-wrap{height:220px;min-height:220px;max-height:220px}.track-canvas-wrap{height:220px;min-height:220px;max-height:220px}}

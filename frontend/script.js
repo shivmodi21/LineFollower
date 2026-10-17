@@ -46,7 +46,8 @@
         const sizedWrap = wrap && (
             wrap.classList.contains('chart-wrap') ||
             wrap.classList.contains('line-pid-chart-wrap') ||
-            wrap.classList.contains('line-plot-wrap')
+            wrap.classList.contains('line-plot-wrap') ||
+            wrap.classList.contains('track-canvas-wrap')
         );
         const dpr = Math.min(window.devicePixelRatio || 1, 2);
         let w, h;
@@ -58,8 +59,10 @@
             w = rect.width;
             h = rect.height;
         }
-        w = Math.max(280, w);
-        h = Math.max(180, h);
+        if (!sizedWrap) {
+            w = Math.max(280, w);
+            h = Math.max(180, h);
+        }
         if (canvas.width !== Math.round(w * dpr) || canvas.height !== Math.round(h * dpr)) {
             canvas.width = Math.round(w * dpr);
             canvas.height = Math.round(h * dpr);
@@ -763,8 +766,8 @@
     if ('ResizeObserver' in window) {
         let resizeFrame = 0;
         const redrawViews = () => {
-            drawLinePidChart();
-            drawTrack();
+            if (environmentMode === 'pid') drawLinePidChart();
+            else drawTrack();
             drawTelemetryChart();
         };
         const scheduleRedrawViews = () => {
