@@ -33,8 +33,8 @@ app.add_middleware(
 DEFAULT_PID = {"kp": 5.0, "ki": 0.0, "kd": 0.0}
 SENSOR_WEIGHTS = {
     "seven": [-3, -2, -1, 0, 1, 2, 3],
+    "five": [-2, -1, 0, 1, 2],
     "two": [-1, 1],
-    "single": [-1.8],
 }
 
 
@@ -66,8 +66,8 @@ class SimulationRequest(BaseModel):
 class SensorSimulationRequest(BaseModel):
     # Normalized points keep the API independent of browser canvas dimensions.
     path: list[Point] = Field(min_length=2, max_length=2000)
-    sensor_model: Literal["seven", "two", "single"] = "seven"
-    controller: Literal["P", "PD", "PID"] = "P"
+    sensor_model: Literal["seven", "five", "two"] = "seven"
+    controller: Literal["P", "PD", "PID", "PID Ratio"] = "PID"
     pid: PIDGains = Field(default_factory=PIDGains)
     canvas_width: int = Field(default=640, ge=120, le=2000)
     canvas_height: int = Field(default=360, ge=120, le=2000)
@@ -273,9 +273,6 @@ def sensor_simulate(request: SensorSimulationRequest):
             elif detected[0]: error = -1.8
             elif detected[1]: error = 1.8
             else: error = 0.0 if prev_error == 0 else math.copysign(2.8, prev_error)
-        elif request.sensor_model == "single":
-            if detected[0]: error = -0.75
-            else: error = 1.6 if prev_error == 0 else math.copysign(2.2, prev_error)
         elif active == 0:
             error = 0.0 if prev_error == 0 else math.copysign(3.0, prev_error)
         else:
@@ -289,6 +286,8 @@ def sensor_simulate(request: SensorSimulationRequest):
         p_term = request.pid.kp * error
         i_term = request.pid.ki * integral if request.controller == "PID" else 0.0
         d_term = request.pid.kd * derivative if request.controller in ("PD", "PID") else 0.0
+        if request.controller == "PID Ratio":
+            i_term = d_term = 0.0
         output = p_term + i_term + d_term
         steering = max(-0.18, min(0.18, output * 0.012))
         heading = _wrap_angle(heading + steering)

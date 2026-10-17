@@ -252,50 +252,123 @@
     let drawingEnabled = false,
         isDrawing = false;
     const sensorKp = $('sensorKp'),
-        sensorKi = $('sensorKi'),
-        sensorKd = $('sensorKd');
+        sensorTi = $('sensorTi'),
+        sensorTd = $('sensorTd'),
+        sensorRatio = $('sensorRatio');
     const sensorController = $('sensorController');
     const sensorModel = $('sensorModel');
     const sensorWeights = {
         '7': [-3, -2, -1, 0, 1, 2, 3],
-        '2': [-1, 1],
-        '1': [-1.8]
+        '5': [-2, -1, 0, 1, 2],
+        '2': [-1, 1]
     };
     const sensorModelApi = {
         '7': 'seven',
-        '2': 'two',
-        '1': 'single'
+        '5': 'five',
+        '2': 'two'
     };
     const API_BASE = (location.protocol === 'file:' || ['localhost', '127.0.0.1'].includes(location.hostname)) ?
         'http://127.0.0.1:8000' : location.origin;
 
+    let environmentMode = 'sensor';
+    let telemetryHistory = [];
+    let lastSimulationMetrics = {};
+
+    function controllerGains() {
+        const kp = Number(sensorKp.value);
+        const controller = sensorController.value;
+        if (controller === 'PID Ratio') return { kp: Number(sensorRatio.value), ki: 0, kd: 0 };
+        const ti = Math.max(1, Number(sensorTi.value));
+        const td = Number(sensorTd.value);
+        return {
+            kp,
+            ki: controller === 'PID' ? kp / ti : 0,
+            kd: (controller === 'PD' || controller === 'PID') ? Math.min(100, kp * td) : 0
+        };
+    }
+
     function updateSensorGains() {
         $('sensorKpOut').value = (+sensorKp.value).toFixed(1);
-        $('sensorKiOut').value = (+sensorKi.value).toFixed(2);
-        $('sensorKdOut').value = (+sensorKd.value).toFixed(1);
+        $('sensorTiOut').value = sensorTi.value;
+        $('sensorTdOut').value = (+sensorTd.value).toFixed(1);
+        $('sensorRatioOut').value = (+sensorRatio.value).toFixed(1);
         const mode = sensorController.value;
-        const kiEnabled = mode === 'PID';
-        const kdEnabled = mode !== 'P';
-        sensorKi.disabled = !kiEnabled;
-        sensorKd.disabled = !kdEnabled;
-        $('sensorKiGroup').style.opacity = kiEnabled ? '1' : '.45';
-        $('sensorKdGroup').style.opacity = kdEnabled ? '1' : '.45';
+        $('sensorTiGroup').hidden = mode !== 'PID';
+        $('sensorTdGroup').hidden = !(mode === 'PD' || mode === 'PID');
+        $('ratioGroup').hidden = mode !== 'PID Ratio';
+        $('kpGroup').hidden = mode === 'PID Ratio';
+        const hints = {
+            P: 'P reacts to current error only.',
+            PD: 'PD reacts to current error and its rate of change. Tau_D controls derivative time.',
+            PID: 'PID combines current, accumulated, and changing error. Tau_I and Tau_D control integral and derivative time constants.',
+            'PID Ratio': 'PID Ratio reproduces the ratio-style steering used in the source scripts: a single gain scales the sensor error.'
+        };
+        $('controllerHint').textContent = hints[mode];
+    }
+
+    function setEnvironment(mode) {
+        environmentMode = mode;
+        const sensor = mode === 'sensor';
+        $('sensorEnvironmentTab').classList.toggle('active', sensor);
+        $('pathEnvironmentTab').classList.toggle('active', !sensor);
+        $('sensorEnvironmentTab').setAttribute('aria-selected', String(sensor));
+        $('pathEnvironmentTab').setAttribute('aria-selected', String(!sensor));
+        $('sensorModelGroup').hidden = !sensor;
+        $('environmentTitle').textContent = sensor ? 'Sensor based control' : 'Path-aware control';
+        $('environmentDescription').textContent = sensor
+            ? 'The vehicle only sees the line through its sensors. If all sensors lose the line, it cannot directly calculate its distance from the track.'
+            : 'The vehicle knows the track geometry. It estimates cross-track error and can steer back toward the nearest point on the path even after drifting away.';
+        $('sensorReadoutLabel').textContent = sensor ? `SENSOR ARRAY · ${sensorWeights[sensorModel.value].length}` : 'PATH GEOMETRY';
+        resetSensorRobot();
+        drawTelemetryChart();
     }
 
     function updateSensorReadings() {
         const bars = $('sensorBars').querySelectorAll('i');
         bars.forEach((bar, i) => {
-            bar.hidden = i >= robot.sensors.length;
+            bar.hidden = i >= robot.sensors.length || environmentMode !== 'sensor';
             bar.classList.toggle('active', !!robot.sensors[i]);
         });
-        $('sensorReadoutLabel').textContent = 'SENSOR ARRAY · ' + robot.sensors.length;
-        $('errorReadout').textContent = 'ERROR: ' + Number(robot.error || 0).toFixed(2);
-        const notes = {
-            '7': 'Seven sensors estimate line position using a weighted average. Sensor and controller calculations run on the backend.',
-            '2': 'Two sensors use rule-based steering. Sensor states and steering are calculated by the backend.',
-            '1': 'A single offset sensor demonstrates edge tracking. Sensor states and steering are calculated by the backend.'
+        $('sensorReadoutLabel').textContent = environmentMode === 'sensor'
+            ? 'SENSOR ARRAY · ' + robot.sensors.length : 'PATH GEOMETRY';
+        $('errorReadout').textContent = (environmentMode === 'sensor' ? 'SENSOR ERROR: ' : 'CROSS-TRACK: ') + Number(robot.error || 0).toFixed(2);
+    }
+
+    function drawTelemetryChart() {
+        const canvas = $('lineTelemetryChart');
+        if (!canvas) return;
+        const context = canvas.getContext('2d');
+        const {w, h} = fitCanvas(canvas, context);
+        context.clearRect(0, 0, w, h);
+        context.fillStyle = '#0d1525'; context.fillRect(0, 0, w, h);
+        const left = 42, right = 12, top = 14, bottom = 28;
+        const plotW = w - left - right, plotH = h - top - bottom;
+        context.font = '10px "DM Mono", monospace'; context.fillStyle = '#9aa8bf';
+        context.strokeStyle = '#273149'; context.lineWidth = 1;
+        for (let i = 0; i <= 4; i++) {
+            const y = top + plotH * i / 4;
+            context.beginPath(); context.moveTo(left, y); context.lineTo(w-right, y); context.stroke();
+            context.fillText((2 - i).toString(), 10, y + 3);
+        }
+        context.fillText('time →', w - 52, h - 7);
+        const history = telemetryHistory.slice(-180);
+        if (history.length < 2) {
+            context.fillText('Run a simulation to plot live telemetry', left + 8, top + plotH / 2);
+            return;
+        }
+        const drawSeries = (key, color, scale) => {
+            const vals = history.map(d => Number(d[key] || 0));
+            const maxAbs = Math.max(1, ...vals.map(Math.abs));
+            context.strokeStyle = color; context.lineWidth = 1.8; context.beginPath();
+            vals.forEach((value, i) => {
+                const x = left + plotW * i / (vals.length - 1);
+                const y = top + plotH / 2 - (value / maxAbs) * plotH * .43;
+                if (i === 0) context.moveTo(x, y); else context.lineTo(x, y);
+            });
+            context.stroke();
         };
-        $('sensorModelNote').textContent = notes[sensorModel.value];
+        drawSeries('error', '#65e6c4');
+        drawSeries('output', '#ffb36b');
     }
 
     function drawTrack() {
@@ -378,7 +451,7 @@
         tctx.restore();
         const sensorX = cx + forward.x * 13,
             sensorY = cy + forward.y * 13;
-        weights.forEach((weight, i) => {
+        if (environmentMode === 'sensor') weights.forEach((weight, i) => {
             const x = sensorX + normal.x * weight * 5.2,
                 y = sensorY + normal.y * weight * 5.2;
             tctx.beginPath();
@@ -398,6 +471,13 @@
         cancelAnimationFrame(animationFrame);
         sensorFrames = [];
         sensorFrameIndex = 0;
+        telemetryHistory = [];
+        lastSimulationMetrics = {};
+        $('lineErrorMetric').textContent = '—';
+        $('lineOutputMetric').textContent = '—';
+        $('lineStepsMetric').textContent = '0';
+        $('lineLostMetric').textContent = '0';
+        $('linePlotStatus').textContent = 'READY TO RUN';
         if (path.length >= 2) {
             const a = path[0],
                 b = path[1];
@@ -431,6 +511,7 @@
         $('animateRobot').innerHTML = 'Run simulation <i class="fa-solid fa-play" aria-hidden="true"></i>';
         updateSensorReadings();
         drawTrack();
+        drawTelemetryChart();
     }
 
     function animateSensorFrames(token) {
@@ -438,6 +519,8 @@
         if (sensorFrameIndex >= sensorFrames.length) {
             robot.running = false;
             $('robotState').textContent = 'COMPLETE';
+            $('linePlotStatus').textContent = 'SIMULATION COMPLETE';
+            $('lineLostMetric').textContent = String(lastSimulationMetrics.lost_line_steps ?? lastSimulationMetrics.lost_track_steps ?? 0);
             $('animateRobot').innerHTML = 'Run again <i class="fa-solid fa-play" aria-hidden="true"></i>';
             return;
         }
@@ -447,9 +530,15 @@
             ...frame,
             running: true,
             step: frame.step,
-            sensors: frame.sensors || []
+            sensors: frame.sensors || robot.sensors || []
         };
+        telemetryHistory.push({ error: Number(frame.error ?? frame.cross_track_error ?? 0), output: Number(frame.steering ?? 0) });
+        $('lineErrorMetric').textContent = Number(frame.error ?? frame.cross_track_error ?? 0).toFixed(3);
+        $('lineOutputMetric').textContent = Number(frame.steering ?? 0).toFixed(4);
+        $('lineStepsMetric').textContent = String(frame.step ?? sensorFrameIndex);
+        $('linePlotStatus').textContent = 'RUNNING';
         drawTrack();
+        drawTelemetryChart();
         animationFrame = requestAnimationFrame(() => animateSensorFrames(token));
     }
     async function runSensorSimulation() {
@@ -462,48 +551,62 @@
         const token = ++requestToken;
         robot.running = false;
         cancelAnimationFrame(animationFrame);
+        telemetryHistory = [];
+        lastSimulationMetrics = {};
+        $('lineErrorMetric').textContent = '—'; $('lineOutputMetric').textContent = '—';
+        $('lineStepsMetric').textContent = '0'; $('lineLostMetric').textContent = '0';
+        $('linePlotStatus').textContent = 'CALCULATING…';
         $('robotState').textContent = 'CALCULATING';
         $('animateRobot').disabled = true;
         $('animateRobot').innerHTML = 'Calculating… <i class="fa-solid fa-spinner fa-spin" aria-hidden="true"></i>';
-        const {
-            w,
-            h
-        } = fitCanvas(track, tctx);
+        const {w, h} = fitCanvas(track, tctx);
+        const gains = controllerGains();
+        const controller = sensorController.value;
         const payload = {
             path,
             sensor_model: sensorModelApi[sensorModel.value],
-            controller: sensorController.value,
-            pid: {
-                kp: Number(sensorKp.value),
-                ki: Number(sensorKi.value),
-                kd: Number(sensorKd.value)
-            },
+            controller,
+            pid: gains,
             canvas_width: Math.max(120, Math.round(w)),
             canvas_height: Math.max(120, Math.round(h)),
             speed: 1.45,
             max_steps: 2200
         };
         try {
-            const data = await requestJSON(`${API_BASE}/api/sensor-simulate`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify(payload)
-            }, 'Sensor simulation request failed.');
+            let data;
+            if (environmentMode === 'sensor') {
+                data = await requestJSON(`${API_BASE}/api/sensor-simulate`, {
+                    method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload)
+                }, 'Sensor simulation request failed.');
+            } else {
+                const pixelPath = path.map(point => ({x: point.x * w, y: point.y * h}));
+                data = await requestJSON(`${API_BASE}/api/simulate`, {
+                    method: 'POST', headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({path: pixelPath, pid: gains, speed: 2, max_steps: 2200, lookahead: 24})
+                }, 'Path-aware simulation request failed.');
+                data.frames = (data.frames || []).map(frame => ({
+                    ...frame, x: frame.x / w, y: frame.y / h,
+                    error: frame.cross_track_error ?? frame.error,
+                    sensors: []
+                }));
+            }
             if (token !== requestToken) return;
             sensorFrames = data.frames || [];
+            lastSimulationMetrics = data.metrics || {};
             if (!sensorFrames.length) throw new Error('The backend returned no simulation frames.');
+            $('lineLostMetric').textContent = String(lastSimulationMetrics.lost_line_steps ?? lastSimulationMetrics.lost_track_steps ?? 0);
             sensorFrameIndex = 0;
             $('robotState').textContent = 'RUNNING';
-            $('animateRobot').innerHTML = 'Running… <i class="fa-solid fa-pause" aria-hidden="true"></i>';
+            $('linePlotStatus').textContent = 'RUNNING';
+            $('animateRobot').innerHTML = 'Running… <i class="fa-solid fa-spinner fa-spin" aria-hidden="true"></i>';
             robot.running = true;
             animateSensorFrames(token);
         } catch (error) {
             if (token !== requestToken) return;
             $('robotState').textContent = 'API ERROR';
+            $('linePlotStatus').textContent = 'API ERROR';
             $('animateRobot').innerHTML = 'Retry simulation <i class="fa-solid fa-rotate-right" aria-hidden="true"></i>';
-            $('sensorModelNote').textContent = `Could not run backend simulation: ${error.message}. Start FastAPI at http://127.0.0.1:8000 or check the deployed API URL.`;
+            $('environmentDescription').textContent = `Simulation failed: ${error.message}. Check that FastAPI is running and the API URL is correct.`;
         } finally {
             if (token === requestToken) $('animateRobot').disabled = false;
         }
@@ -599,12 +702,14 @@
     });
     $('animateRobot').addEventListener('click', runSensorSimulation);
     $('resetRobot').addEventListener('click', resetSensorRobot);
-    [sensorKp, sensorKi, sensorKd].forEach(el => el.addEventListener('input', updateSensorGains));
+    [sensorKp, sensorTi, sensorTd, sensorRatio].forEach(el => el.addEventListener('input', updateSensorGains));
     sensorController.addEventListener('change', updateSensorGains);
+    $('sensorEnvironmentTab').addEventListener('click', () => setEnvironment('sensor'));
+    $('pathEnvironmentTab').addEventListener('click', () => setEnvironment('path'));
     sensorModel.addEventListener('change', () => {
         resetSensorRobot();
         const n = sensorWeights[sensorModel.value].length;
-        $('trackCanvas').setAttribute('aria-label', `Animated line-following robot with ${n} sensor${n===1?'':'s'}`);
+        $('trackCanvas').setAttribute('aria-label', `Animated line-following robot with ${n} sensors`);
         updateSensorReadings();
         drawTrack();
     });
@@ -612,13 +717,16 @@
         new ResizeObserver(() => {
             drawChart();
             drawTrack();
+            drawTelemetryChart();
         }).observe(chart.parentElement);
     } else window.addEventListener('resize', () => {
         drawChart();
         drawTrack();
+        drawTelemetryChart();
     });
     updateOutputs();
     runSimulation();
     updateSensorGains();
+    setEnvironment('sensor');
     resetSensorRobot();
 })();

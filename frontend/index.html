@@ -190,91 +190,102 @@
             <section class="line-section section-wrap" id="line-follower">
                 <div class="section-heading">
                     <div>
-                        <div class="eyebrow">
-                            02 / APPLICATION
-                        </div>
-                        <h2>
-                            From equations to a moving robot
-                        </h2>
+                        <div class="eyebrow">02 / APPLICATION</div>
+                        <h2>Line-following simulator</h2>
                     </div>
-                    <p>
-                        The same control mindset can guide a robot as it follows a path. Your source project explores line sensing and steering corrections.
-                    </p>
+                    <p>Compare sensor-only steering with path-aware recovery using the same track and vehicle drawing area.</p>
                 </div>
+
+                <div class="environment-tabs" role="tablist" aria-label="Simulation environment">
+                    <button id="sensorEnvironmentTab" class="environment-tab active" type="button" role="tab" aria-selected="true" data-environment="sensor">
+                        <i class="fa-solid fa-eye" aria-hidden="true"></i><span>Sensor Based</span><small>React to sensor readings</small>
+                    </button>
+                    <button id="pathEnvironmentTab" class="environment-tab" type="button" role="tab" aria-selected="false" data-environment="path">
+                        <i class="fa-solid fa-route" aria-hidden="true"></i><span>Path Aware</span><small>Use track geometry to recover</small>
+                    </button>
+                </div>
+
                 <div class="line-layout panel">
-                    <div class="line-copy">
-                        <span class="panel-kicker">LINE-FOLLOWING CONCEPT</span>
-                        <h3>
-                            Sense the line.<br /><span class="accent">Correct the heading.</span>
-                        </h3>
-                        <p>
-                            Your seven-sensor implementation estimates lateral error from which sensors detect the line, then turns the robot based on that error.
-                        </p>
-                        <div class="sensor-legend">
-                            <span><i class="sensor-dot active"></i> Detecting line</span><span><i class="sensor-dot"></i> No line detected</span>
-                        </div>
+                    <aside class="line-copy environment-controls">
+                        <span class="panel-kicker">CONTROLLER SETTINGS</span>
+                        <h3 id="environmentTitle">Sensor based control</h3>
+                        <p id="environmentDescription">The vehicle only sees the line through its sensors. When all sensors lose the line, it cannot directly calculate its distance from the track.</p>
+
                         <div class="sensor-controls">
-                            <label for="sensorModel">Sensor model</label>
-                            <select id="sensorModel">
-                                <option value="7">Seven sensors — weighted error</option>
-                                <option value="2">Two sensors — rule-based</option>
-                                <option value="1">Single sensor — edge tracking</option>
-                            </select>
-                            <label for="sensorController">Controller</label>
-                            <select id="sensorController">
-                                <option value="P">P — proportional</option><option value="PD">PD — proportional + derivative</option><option value="PID">PID — all three terms</option>
-                            </select>
-                            <div class="sensor-gain">
-                                <label for="sensorKp">Kp <output id="sensorKpOut">5.0</output></label><input id="sensorKp" type="range" min="0" max="12" step="0.1" value="5">
+                            <div class="control-field" id="sensorModelGroup">
+                                <label for="sensorModel">Sensor configuration</label>
+                                <select id="sensorModel">
+                                    <option value="2">Two sensors</option>
+                                    <option value="5">Five sensors</option>
+                                    <option value="7" selected>Seven sensors</option>
+                                </select>
                             </div>
-                            <div class="sensor-gain" id="sensorKiGroup">
-                                <label for="sensorKi">Ki <output id="sensorKiOut">0.0</output></label><input id="sensorKi" type="range" min="0" max="1" step="0.01" value="0">
+                            <div class="control-field">
+                                <label for="sensorController">Controller</label>
+                                <select id="sensorController">
+                                    <option value="P">P</option>
+                                    <option value="PD">PD</option>
+                                    <option value="PID" selected>PID</option>
+                                    <option value="PID Ratio">PID Ratio</option>
+                                </select>
                             </div>
-                            <div class="sensor-gain" id="sensorKdGroup">
-                                <label for="sensorKd">Kd <output id="sensorKdOut">0.0</output></label><input id="sensorKd" type="range" min="0" max="8" step="0.1" value="0">
+                            <div class="sensor-gain" id="kpGroup">
+                                <label for="sensorKp">Kp <output id="sensorKpOut">5.0</output></label>
+                                <input id="sensorKp" type="range" min="0" max="12" step="0.1" value="5">
                             </div>
+                            <div class="sensor-gain tau-control" id="sensorTiGroup">
+                                <label for="sensorTi">Tau_I <output id="sensorTiOut">60</output></label>
+                                <input id="sensorTi" type="range" min="5" max="180" step="1" value="60">
+                            </div>
+                            <div class="sensor-gain tau-control" id="sensorTdGroup">
+                                <label for="sensorTd">Tau_D <output id="sensorTdOut">7</output></label>
+                                <input id="sensorTd" type="range" min="0" max="30" step="0.5" value="7">
+                            </div>
+                            <div class="sensor-gain" id="ratioGroup" hidden>
+                                <label for="sensorRatio">PID ratio <output id="sensorRatioOut">5.0</output></label>
+                                <input id="sensorRatio" type="range" min="0" max="12" step="0.1" value="5">
+                            </div>
+                            <p class="control-hint" id="controllerHint">PID combines current, accumulated, and changing error. Tau_I and Tau_D control the integral and derivative time constants.</p>
                         </div>
+
                         <div class="line-actions">
-                            <button id="animateRobot" class="button primary" type="button">
-                                Run simulation <i class="fa-solid fa-play" aria-hidden="true"></i>
-                            </button>
-                            <button id="resetRobot" class="button secondary" type="button">
-                                Reset robot <i class="fa-solid fa-rotate-left" aria-hidden="true"></i>
-                            </button>
+                            <button id="animateRobot" class="button primary" type="button"><i class="fa-solid fa-play" aria-hidden="true"></i> Run simulation</button>
+                            <button id="resetRobot" class="button secondary" type="button">Reset</button>
                         </div>
-                        <p class="panel-note">
-                            <i class="fa-solid fa-circle-info" aria-hidden="true"></i><span id="sensorModelNote">Seven discrete sensors detect the dark track. The selected controller converts sensor error into steering; this is a browser simulation inspired by your Pygame sources, not a hardware model.</span>
-                        </p>
+                        <p class="panel-note"><i class="fa-solid fa-circle-info" aria-hidden="true"></i> Numerical simulation inspired by the supplied Pygame implementations; not a hardware controller.</p>
+                    </aside>
+
+                    <div class="track-wrap">
+                        <div class="track-label"><span>SHARED DRAWING AREA</span><span id="robotState">READY</span></div>
+                        <div class="track-tools">
+                            <button id="drawTrackBtn" class="button secondary" type="button"><i class="fa-solid fa-pencil" aria-hidden="true"></i> Draw track</button>
+                            <button id="exampleTrackBtn" class="button secondary" type="button">Example track</button>
+                            <button id="clearTrackBtn" class="button secondary" type="button">Clear track</button>
                         </div>
-                        <div class="track-wrap">
-                            <div class="track-label">
-                                <span>DRAW YOUR TRACK</span><span id="robotState">IDLE</span>
-                            </div>
-                            <div class="track-tools">
-                                <button id="drawTrackBtn" class="button secondary" type="button">
-                                    <i class="fa-solid fa-pencil" aria-hidden="true"></i> Draw track
-                                </button>
-                                <button id="exampleTrackBtn" class="button secondary" type="button">
-                                    Example track
-                                </button>
-                                <button id="clearTrackBtn" class="button secondary" type="button">
-                                    Clear track
-                                </button>
-                            </div>
-                            <p id="drawHint" class="draw-hint">
-                                Choose “Draw track”, then drag on the canvas with your mouse or finger. Finish drawing before running the robot.
-                            </p>
-                            <canvas id="trackCanvas" role="img" aria-label="Track canvas. Draw a path with mouse or touch, then run the line-following robot.">
-                            </canvas>
-                            <div class="sensor-readout">
-                                <span id="sensorReadoutLabel">SENSOR ARRAY · 7</span>
-                                <div id="sensorBars" class="sensor-bars">
-                                    <i></i><i></i><i></i><i></i><i></i><i></i><i></i>
-                                </div>
-                                <span id="errorReadout">ERROR: 0.00</span>
-                            </div>
+                        <p id="drawHint" class="draw-hint">Choose “Draw track”, drag on the canvas, then select “Finish drawing”.</p>
+                        <canvas id="trackCanvas" role="img" aria-label="Line-following simulation canvas with a vehicle and drawn track"></canvas>
+                        <div class="sensor-readout">
+                            <span id="sensorReadoutLabel">SENSOR ARRAY · 7</span>
+                            <div id="sensorBars" class="sensor-bars"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+                            <span id="errorReadout">ERROR: 0.00</span>
                         </div>
-                        </div>
+                    </div>
+                </div>
+
+                <div class="line-telemetry panel">
+                    <div class="panel-heading chart-heading">
+                        <div><span class="panel-kicker">LIVE TELEMETRY</span><h3>Tracking error and control output</h3></div>
+                        <span class="running-label"><i class="status-dot"></i><span id="linePlotStatus">READY TO RUN</span></span>
+                    </div>
+                    <div class="line-metrics-grid">
+                        <div class="metric"><span>Current tracking error</span><strong id="lineErrorMetric">—</strong><small>Sensor or cross-track error</small></div>
+                        <div class="metric"><span>Control output</span><strong id="lineOutputMetric">—</strong><small>Steering command</small></div>
+                        <div class="metric"><span>Steps simulated</span><strong id="lineStepsMetric">0</strong><small>Frames calculated</small></div>
+                        <div class="metric"><span>Lost line / track</span><strong id="lineLostMetric">0</strong><small>Steps without reliable tracking</small></div>
+                    </div>
+                    <div class="line-plot-wrap"><canvas id="lineTelemetryChart" role="img" aria-label="Live chart of tracking error and steering output"></canvas></div>
+                    <div class="chart-key"><span><i class="legend-line mint"></i> Tracking error</span><span><i class="legend-line orange"></i> Control output / steering</span></div>
+                </div>
             </section>
 
 
