@@ -66,3 +66,10 @@ The original line-following robot algorithms and related concepts were sourced f
 - [Kurs budowy robotów Line Follower](https://forbot.pl/blog/kurs-budowy-robotow-line-follower-czyli-bolid-f1-id19363)
 
 This project builds on and adapts these references for an interactive web-based demonstration. Credit belongs to the original authors and publishers. Please refer to the original sources for their applicable licensing and attribution terms.
+
+---
+
+## Author
+
+**Shiv Modi** — B.Tech. + M.Tech., IIT Bombay  
+[GitHub](https://github.com/shivmodi21) · [Portfolio](https://shivmodi21.github.io/) · [LinkedIn](https://www.linkedin.com/in/shivmodi210/)
