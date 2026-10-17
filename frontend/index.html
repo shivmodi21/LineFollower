@@ -57,13 +57,19 @@
       <div class="section-heading"><div><div class="eyebrow">02 / APPLICATION</div><h2>From equations to a moving robot</h2></div><p>The same control mindset can guide a robot as it follows a path. Your source project explores line sensing and steering corrections.</p></div>
       <div class="line-layout panel"><div class="line-copy"><span class="panel-kicker">LINE-FOLLOWING CONCEPT</span><h3>Sense the line.<br /><span class="accent">Correct the heading.</span></h3><p>Your seven-sensor implementation estimates lateral error from which sensors detect the line, then turns the robot based on that error.</p><div class="sensor-legend"><span><i class="sensor-dot active"></i> Detecting line</span><span><i class="sensor-dot"></i> No line detected</span></div>
           <div class="sensor-controls">
+            <label for="sensorModel">Sensor model</label>
+            <select id="sensorModel">
+              <option value="7">Seven sensors — weighted error</option>
+              <option value="2">Two sensors — rule-based</option>
+              <option value="1">Single sensor — edge tracking</option>
+            </select>
             <label for="sensorController">Controller</label><select id="sensorController"><option value="P">P — proportional</option><option value="PD">PD — proportional + derivative</option><option value="PID">PID — all three terms</option></select>
             <div class="sensor-gain"><label for="sensorKp">Kp <output id="sensorKpOut">5.0</output></label><input id="sensorKp" type="range" min="0" max="12" step="0.1" value="5"></div>
             <div class="sensor-gain" id="sensorKiGroup"><label for="sensorKi">Ki <output id="sensorKiOut">0.0</output></label><input id="sensorKi" type="range" min="0" max="1" step="0.01" value="0"></div>
             <div class="sensor-gain" id="sensorKdGroup"><label for="sensorKd">Kd <output id="sensorKdOut">0.0</output></label><input id="sensorKd" type="range" min="0" max="8" step="0.1" value="0"></div>
           </div>
           <div class="line-actions"><button id="animateRobot" class="button primary" type="button">Run simulation <span>▶</span></button><button id="resetRobot" class="button secondary" type="button">Reset</button></div>
-          <p class="panel-note">Seven discrete sensors detect the dark track. The selected controller converts sensor error into steering; this is a browser simulation inspired by <code>myLineFollower.py</code>, not a hardware model.</p></div><div class="track-wrap"><div class="track-label"><span>TRACK SIMULATION</span><span id="robotState">IDLE</span></div><canvas id="trackCanvas" role="img" aria-label="Animated line-following robot with seven sensors"></canvas><div class="sensor-readout"><span>SENSOR ARRAY</span><div id="sensorBars" class="sensor-bars"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div><span id="errorReadout">ERROR: 0.00</span></div></div></div>
+          <p class="panel-note" id="sensorModelNote">Seven discrete sensors detect the dark track. The selected controller converts sensor error into steering; this is a browser simulation inspired by your Pygame sources, not a hardware model.</p></div><div class="track-wrap"><div class="track-label"><span>TRACK SIMULATION</span><span id="robotState">IDLE</span></div><canvas id="trackCanvas" role="img" aria-label="Animated line-following robot with selectable sensor models"></canvas><div class="sensor-readout"><span id="sensorReadoutLabel">SENSOR ARRAY · 7</span><div id="sensorBars" class="sensor-bars"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div><span id="errorReadout">ERROR: 0.00</span></div></div></div>
     </section>
 
     <section class="theory-section section-wrap" id="theory"><div class="section-heading"><div><div class="eyebrow">03 / THE FUNDAMENTALS</div><h2>Three terms. One response.</h2></div><p>A PID controller combines three complementary responses to reduce the difference between a target and measured output.</p></div>

@@ -121,6 +121,8 @@
   const path = [{x:.08,y:.82},{x:.18,y:.78},{x:.28,y:.66},{x:.38,y:.67},{x:.48,y:.52},{x:.57,y:.44},{x:.67,y:.49},{x:.78,y:.31},{x:.91,y:.22}];
   const sensorKp = $('sensorKp'), sensorKi = $('sensorKi'), sensorKd = $('sensorKd');
   const sensorController = $('sensorController');
+  const sensorModel = $('sensorModel');
+  const sensorWeights = { '7': [-3,-2,-1,0,1,2,3], '2': [-1,1], '1': [-1.8] };
   function updateSensorGains() {
     $('sensorKpOut').value = (+sensorKp.value).toFixed(1);
     $('sensorKiOut').value = (+sensorKi.value).toFixed(2);
@@ -132,7 +134,7 @@
   function resetSensorRobot() {
     robot.running = false; cancelAnimationFrame(animationFrame);
     const a=path[0], b=path[1];
-    robot={x:a.x,y:a.y,heading:Math.atan2((b.y-a.y), (b.x-a.x)),running:false,step:0,integral:0,previousError:0,error:0,sensors:Array(7).fill(false)};
+    robot={x:a.x,y:a.y,heading:Math.atan2((b.y-a.y), (b.x-a.x)),running:false,step:0,integral:0,previousError:0,error:0,sensors:Array(sensorWeights[sensorModel.value].length).fill(false)};
     $('robotState').textContent='READY'; $('animateRobot').innerHTML='Run simulation <span>▶</span>';
     updateSensorReadings(); drawTrack();
   }
@@ -145,7 +147,7 @@
     const {w,h}=fitCanvas(track,tctx), px=robot.x*w, py=robot.y*h;
     const forward={x:Math.cos(robot.heading),y:Math.sin(robot.heading)};
     const normal={x:-forward.y,y:forward.x};
-    const weights=[-3,-2,-1,0,1,2,3], detected=[];
+    const weights=sensorWeights[sensorModel.value], detected=[];
     const sx=px+forward.x*13, sy=py+forward.y*13;
     for(const weight of weights){
       const x=sx+normal.x*weight*5.2, y=sy+normal.y*weight*5.2;
@@ -155,8 +157,19 @@
     }
     robot.sensors=detected;
     const active=weights.reduce((sum,weight,i)=>sum+(detected[i]?1:0),0);
-    if(!active){
-      // Keep the last error briefly when all sensors lose the line, so the robot searches toward it.
+    if (sensorModel.value === '2') {
+      // Two-sensor rule tracker: both on line = centered; one active = steer toward it.
+      if (detected[0] && detected[1]) robot.error = 0;
+      else if (detected[0]) robot.error = -1.8;
+      else if (detected[1]) robot.error = 1.8;
+      else robot.error = robot.previousError === 0 ? 0 : Math.sign(robot.previousError)*2.8;
+    } else if (sensorModel.value === '1') {
+      // Single offset sensor follows one edge: switch correction based on whether
+      // the sensor sees the line, retaining the last search direction when it does not.
+      if (detected[0]) robot.error = -0.75;
+      else robot.error = robot.previousError === 0 ? 1.6 : Math.sign(robot.previousError)*2.2;
+    } else if (!active) {
+      // Seven-sensor weighted array: briefly retain the last direction to search.
       robot.error = robot.previousError === 0 ? 0 : Math.sign(robot.previousError)*3;
     } else {
       robot.error=weights.reduce((sum,weight,i)=>sum+(detected[i]?weight:0),0)/active;
@@ -164,8 +177,21 @@
     return {w,h,forward,normal,sx,sy,weights};
   }
   function updateSensorReadings(){
-    $('sensorBars').querySelectorAll('i').forEach((bar,i)=>bar.classList.toggle('active',!!robot.sensors[i]));
+    const bars=$('sensorBars').querySelectorAll('i');
+    bars.forEach((bar,i)=>{
+      const modelWeights=sensorWeights[sensorModel.value];
+      const used=i<modelWeights.length;
+      bar.hidden=!used;
+      bar.classList.toggle('active',!!robot.sensors[i]);
+    });
+    $('sensorReadoutLabel').textContent='SENSOR ARRAY · '+sensorWeights[sensorModel.value].length;
     $('errorReadout').textContent='ERROR: '+robot.error.toFixed(2);
+    const notes={
+      '7':'Seven sensors estimate line position using a weighted average. P, PD, and PID modes are available.',
+      '2':'Two sensors use simple rules: both detect the line means centered; a single detection steers toward that side.',
+      '1':'A single offset sensor demonstrates edge tracking. It follows one edge and uses a simple search correction when the line is lost.'
+    };
+    $('sensorModelNote').textContent=notes[sensorModel.value];
   }
   function drawTrack() {
     const {w,h}=fitCanvas(track,tctx); tctx.clearRect(0,0,w,h); tctx.fillStyle='#111a2b';tctx.fillRect(0,0,w,h);
@@ -215,6 +241,12 @@
   $('resetRobot').addEventListener('click',resetSensorRobot);
   [sensorKp,sensorKi,sensorKd].forEach(el=>el.addEventListener('input',()=>{updateSensorGains();}));
   sensorController.addEventListener('change',updateSensorGains);
+  sensorModel.addEventListener('change',()=>{
+    resetSensorRobot();
+    const n=sensorWeights[sensorModel.value].length;
+    $('trackCanvas').setAttribute('aria-label',`Animated line-following robot with ${n} sensor${n===1?'':'s'}`);
+    updateSensorReadings(); drawTrack();
+  });
   if ('ResizeObserver' in window) { new ResizeObserver(() => { drawChart(); drawTrack(); }).observe(chart.parentElement); } else window.addEventListener('resize',()=>{drawChart();drawTrack();});
   updateOutputs(); runSimulation(); updateSensorGains(); resetSensorRobot();
 })();
