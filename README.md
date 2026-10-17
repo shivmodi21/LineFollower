@@ -1,64 +1,84 @@
 # LineFollower
-###### PID Controller
 
-An interactive web project exploring PID control and line-following robot simulations. The project uses Python for the backend and HTML, CSS, and JavaScript for the frontend.
+Interactive **PID Lab** — tune controllers on a process model, then run the same gains on a line-following robot in the browser.
 
-## Features
+The UI is a single-page site (HTML, CSS, JavaScript) served by a **FastAPI** backend. All simulation math runs on the server; the frontend draws tracks, charts, and animation frames from API responses.
 
-- PID controller visualization and tuning
-- Line-following robot simulation
-- Interactive charts and performance metrics
+## Demo
 
-## Tech Stack
+[Live app](https://line-follower.onrender.com)
+hosted on Render
 
-- **Backend:** Python, FastAPI
-- **Frontend:** HTML, CSS, JavaScript
-- **Simulation:** Pygame, NumPy, SciPy, Matplotlib
-- **Deployment:** Render
+## What you can do
 
-## Project Structure
+- **PID tuning**: Step-response experiment (P, PD, PID, PID Ratio) with setpoint, metrics, and live plots.
+- **Sensor-based line follow**: Draw or load a track; simulate weighted IR-style sensors with 2, 5, or 7 sensors.
+- **Path-aware follow**: Same track, but the vehicle uses geometry (cross-track error and lookahead) to recover when it drifts.
+- **Theory & implementation**: Short sections on P/I/D and how the stack is wired.
+
+## How it works
+
+| Layer | Role |
+|--------|------|
+| **Frontend** (`frontend/`) | Layout, controls, canvas rendering, tab switching, calling the API |
+| **Backend** (`backend/main.py`) | REST endpoints, validation (Pydantic), PID process model, sensor and path simulations |
+| **Deploy** | One service can host both API and static files (e.g. Render + Uvicorn) |
+
+### API endpoints
+
+- `POST /api/pid-process` — First-order process + dead time; step response and metrics.
+- `POST /api/sensor-simulate` — Normalized path, sensor model, controller; returns frames for playback.
+- `POST /api/simulate` — Path-aware following on pixel coordinates; returns frames.
+- `GET /docs` — OpenAPI (Swagger UI) when the server is running.
+
+## Tech stack
+
+- **Backend:** Python 3, FastAPI, Uvicorn, Pydantic  
+- **Frontend:** HTML, CSS, JavaScript (Canvas 2D)  
+- **Local run:** `uvicorn backend.main:app --reload` serves the API and `frontend/` static assets
+
+Dependencies are listed in `requirements.txt` (includes FastAPI stack; some packages support optional offline/reference scripts outside this repo).
+
+## Project structure
 
 ```text
-LINEFOLLOWER/
+LineFollower/
 ├── backend/
-│   └── main.py
+│   └── main.py          # FastAPI app, simulation logic, static frontend mount
 ├── frontend/
-│   ├── index.html
-│   ├── script.js
-│   └── styles.css
-├── imgs/
-├── src/
-│   ├── line_follower_color.py
-│   ├── line_follower_dist.py
-│   ├── lineFollower.py
-│   ├── myLineFollower.py
-│   └── pid_tuning.py
+│   ├── index.html       # Page structure and copy
+│   ├── script.js        # UI logic, charts, API client
+│   └── styles.css       # Layout, typography, responsive tokens
+├── requirements.txt     # Python dependencies
+├── .python-version      # Suggested Python version for local dev
 ├── .gitignore
-├── requirements.txt
 └── README.md
 ```
 
 ## Setup
 
+Create a virtual environment:
+
 ```bash
 python -m venv .venv
 ```
 
-Activate the virtual environment and install dependencies:
+Activate it and install dependencies:
 
 ```bash
 pip install -r requirements.txt
 ```
 
-Run the backend locally:
+Run the backend (serves the site at the root URL):
 
 ```bash
 uvicorn backend.main:app --reload
 ```
 
-Open the API documentation at `http://127.0.0.1:8000/docs`.
+Open the app at [http://127.0.0.1:8000](http://127.0.0.1:8000).  
+Interactive API docs: [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs).
 
-## Credits and References
+## References
 
 The original line-following robot algorithms and related concepts were sourced from the following resources:
 
