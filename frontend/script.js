@@ -1,40 +1,13 @@
 (() => {
     const $ = (id) => document.getElementById(id);
-    const controls = {
-        kc: $('kc'),
-        ti: $('ti'),
-        td: $('td'),
-        target: $('target')
-    };
-    const outputs = {
-        kc: $('kcOut'),
-        ti: $('tiOut'),
-        td: $('tdOut'),
-        target: $('targetOut')
-    };
-    const chart = $('responseChart');
-    const ctx = chart.getContext('2d');
+    const API_BASE = (location.protocol === 'file:' || ['localhost', '127.0.0.1'].includes(location.hostname)) ?
+        'http://127.0.0.1:8000' : location.origin;
     const mint = '#65e6c4',
         orange = '#ffb36b',
         muted = '#9aa8bf',
-        grid = '#273149',
-        text = '#edf2fa';
-    let result = null;
+        grid = '#273149';
 
-    function readSettings() {
-        return {
-            kc: +controls.kc.value,
-            ti: +controls.ti.value,
-            td: +controls.td.value,
-            target: +controls.target.value
-        };
-    }
-
-    function updateOutputs() {
-        Object.keys(controls).forEach(k => outputs[k].value = k === 'kc' ? (+controls[k].value).toFixed(1) : controls[k].value);
-    }
-
-    // The process model and PID calculations now run in FastAPI.
+    // Process model and PID calculations run in FastAPI.
     async function requestJSON(url, options, fallbackMessage) {
         let response;
         try {
@@ -152,10 +125,6 @@
         drawLine(opScaled, orange, 1.2, [3, 4]);
     }
 
-    function drawChart() {
-        drawResponseChart(chart, ctx, result);
-    }
-
     function drawLinePidChart() {
         drawResponseChart(linePidChart, linePidCtx, linePidResult);
     }
@@ -200,58 +169,6 @@
             if (environmentMode === 'pid') $('animateRobot').disabled = false;
         }
     }
-
-    function renderMetrics() {
-        $('iaeMetric').textContent = result.iae.toLocaleString(undefined, {
-            maximumFractionDigits: 1
-        });
-        $('overshootMetric').textContent = result.overshoot.toFixed(1) + '%';
-        $('settlingMetric').textContent = result.settling == null ? 'Not settled' : Math.round(result.settling) + ' s';
-        $('sampleCount').textContent = result.t.length + ' samples';
-    }
-    async function runSimulation() {
-        updateOutputs();
-        $('runBtn').disabled = true;
-        $('runStatus').textContent = 'CALCULATING…';
-        try {
-            result = await simulate(readSettings());
-            drawChart();
-            renderMetrics();
-            $('runStatus').textContent = 'SIMULATION COMPLETE';
-        } catch (error) {
-            $('runStatus').textContent = 'API ERROR';
-            $('iaeMetric').textContent = '—';
-            $('overshootMetric').textContent = '—';
-            $('settlingMetric').textContent = '—';
-            $('sampleCount').textContent = error.message || 'Could not reach API';
-        } finally {
-            $('runBtn').disabled = false;
-        }
-    }
-    Object.values(controls).forEach(el => el.addEventListener('input', () => {
-        updateOutputs();
-        $('runStatus').textContent = 'PARAMETERS CHANGED';
-    }));
-    $('runBtn').addEventListener('click', runSimulation);
-    $('resetBtn').addEventListener('click', () => {
-        controls.kc.value = 5;
-        controls.ti.value = 60;
-        controls.td.value = 7;
-        controls.target.value = 60;
-        runSimulation();
-    });
-    chart.addEventListener('mousemove', event => {
-        if (!result) return;
-        const rect = chart.getBoundingClientRect(),
-            xPos = event.clientX - rect.left;
-        const index = Math.max(0, Math.min(1000, Math.round((xPos - 43) / Math.max(1, rect.width - 55) * 1000)));
-        const tip = $('chartTooltip');
-        tip.hidden = false;
-        tip.style.left = Math.max(0, Math.min(rect.width - 140, xPos + 12)) + 'px';
-        tip.style.top = '12px';
-        tip.textContent = `t = ${result.t[index].toFixed(0)} · SP = ${result.sp[index].toFixed(1)} · PV = ${result.pv[index].toFixed(2)} · Output = ${result.op[index].toFixed(1)}%`;
-    });
-    chart.addEventListener('mouseleave', () => $('chartTooltip').hidden = true);
 
     // Sensor simulation calculations now run in FastAPI. The browser only renders
     // the returned frames so all sensor models share the same backend implementation.
@@ -321,9 +238,6 @@
         '5': 'five',
         '2': 'two'
     };
-    const API_BASE = (location.protocol === 'file:' || ['localhost', '127.0.0.1'].includes(location.hostname)) ?
-        'http://127.0.0.1:8000' : location.origin;
-
     let environmentMode = 'pid';
     const lineTarget = $('lineTarget');
     let telemetryHistory = [];
@@ -577,8 +491,8 @@
             $('robotState').textContent = drawingEnabled ? 'DRAW MODE' : 'READY';
         } else {
             robot = {
-                x: 0,
-                y: 0,
+                x: 0.5,
+                y: 0.5,
                 heading: 0,
                 running: false,
                 step: 0,
@@ -832,22 +746,18 @@
     });
 
     if ('ResizeObserver' in window) {
-        const redrawCharts = () => {
-            drawChart();
+        const redrawViews = () => {
             drawLinePidChart();
             drawTrack();
             drawTelemetryChart();
         };
-        new ResizeObserver(redrawCharts).observe(chart.parentElement);
-        if (linePidChart?.parentElement) new ResizeObserver(redrawCharts).observe(linePidChart.parentElement);
+        if (linePidChart?.parentElement) new ResizeObserver(redrawViews).observe(linePidChart.parentElement);
+        if (track?.parentElement) new ResizeObserver(redrawViews).observe(track.parentElement);
     } else window.addEventListener('resize', () => {
-        drawChart();
         drawLinePidChart();
         drawTrack();
         drawTelemetryChart();
     });
-    updateOutputs();
-    runSimulation();
     updateSensorGains();
     setEnvironment('pid');
     runLinePidSimulation();

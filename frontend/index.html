@@ -13,7 +13,7 @@
         <header class="topbar">
             <a class="brand" href="#home" aria-label="PID Lab home"><span class="brand-mark"><i class="fa-solid fa-wave-square" aria-hidden="true"></i></span><span>PID<span class="brand-muted">LAB</span></span></a>
             <nav aria-label="Main navigation">
-                <a href="#simulator">Simulator</a><a href="#line-follower">Line follower</a><a href="#theory">How it works</a>
+                <a href="#line-follower">Simulator</a><a href="#theory">How it works</a>
             </nav>
             <a class="top-cta" href="https://github.com/shivmodi21/LineFollower" target="_blank" rel="noopener noreferrer">Source code <i class="fa-solid fa-up-right-from-square" aria-hidden="true"></i></a>
         </header>
@@ -31,7 +31,7 @@
                         Explore how proportional, integral, and derivative control shape a system's response. Tune the parameters, run the simulation, and see the difference in real time.
                     </p>
                     <div class="hero-actions">
-                        <a class="button primary" href="#simulator">Experiment with PID <i class="fa-solid fa-arrow-down" aria-hidden="true"></i></a><a class="text-link" href="#theory">Understand the fundamentals</a>
+                        <a class="button primary" href="#line-follower">Open the simulator <i class="fa-solid fa-arrow-down" aria-hidden="true"></i></a><a class="text-link" href="#theory">Understand the fundamentals</a>
                     </div>
                     <div class="hero-facts">
                         <div>
@@ -70,128 +70,11 @@
             </section>
 
 
-            <section class="sim-section section-wrap" id="simulator">
-                <div class="section-heading">
-                    <div>
-                        <div class="eyebrow">
-                            01 / EXPERIMENT
-                        </div>
-                        <h2>
-                            PID tuning playground
-                        </h2>
-                    </div>
-                    <p>
-                        Change one parameter at a time and watch the process variable respond to the setpoint.
-                    </p>
-                </div>
-                <div class="sim-layout">
-                    <aside class="panel controls-panel">
-                        <div class="panel-heading">
-                            <div>
-                                <span class="panel-kicker">CONTROLLER SETTINGS</span>
-                                <h3>
-                                    Tune your controller
-                                </h3>
-                            </div>
-                            <button id="resetBtn" class="quiet-button" type="button">
-                                Reset <i class="fa-solid fa-rotate-left" aria-hidden="true"></i>
-                            </button>
-                        </div>
-                        <div class="control-group">
-                            <div class="range-title">
-                                <label for="kc">Proportional gain <span class="symbol">K<sub>c</sub></span></label><output id="kcOut" for="kc">5.0</output>
-                            </div>
-                            <input id="kc" type="range" min="0.1" max="15" step="0.1" value="5"/>
-                            <div class="range-ends">
-                                <span>Gentle</span><span>Responsive</span>
-                            </div>
-                            <p class="control-hint">
-                                Sets how strongly the controller reacts to the current error.
-                            </p>
-                        </div>
-                        <div class="control-group">
-                            <div class="range-title">
-                                <label for="ti">Integral time <span class="symbol">τ<sub>I</sub></span></label><output id="tiOut" for="ti">60</output>
-                            </div>
-                            <input id="ti" type="range" min="5" max="180" step="1" value="60"/>
-                            <div class="range-ends">
-                                <span>Faster accumulation</span><span>Slower</span>
-                            </div>
-                            <p class="control-hint">
-                                Accumulates past error to help remove steady-state offset.
-                            </p>
-                        </div>
-                        <div class="control-group">
-                            <div class="range-title">
-                                <label for="td">Derivative time <span class="symbol">τ<sub>D</sub></span></label><output id="tdOut" for="td">7</output>
-                            </div>
-                            <input id="td" type="range" min="0" max="30" step="0.5" value="7"/>
-                            <div class="range-ends">
-                                <span>None</span><span>More damping</span>
-                            </div>
-                            <p class="control-hint">
-                                Responds to the rate of change in the process variable.
-                            </p>
-                        </div>
-                        <div class="control-group setpoint-group">
-                            <div class="range-title">
-                                <label for="target">Target setpoint</label><output id="targetOut" for="target">60</output>
-                            </div>
-                            <input id="target" type="range" min="25" max="80" step="1" value="60"/>
-                            <p class="control-hint">
-                                Choose the final target value for a single-step experiment.
-                            </p>
-                        </div>
-                        <button id="runBtn" class="button primary full-button" type="button">
-                            Run simulation <i class="fa-solid fa-play" aria-hidden="true"></i>
-                        </button>
-                        <p class="panel-note">
-                            <i class="fa-solid fa-circle-info" aria-hidden="true"></i> This is a browser-based numerical demonstration, not a hardware controller.
-                        </p>
-                    </aside>
-                    <div class="panel chart-panel">
-                        <div class="panel-heading chart-heading">
-                            <div>
-                                <span class="panel-kicker">PROCESS OUTPUT</span>
-                                <h3>
-                                    Setpoint vs. process variable
-                                </h3>
-                            </div>
-                            <span class="running-label"><i class="status-dot"></i><span id="runStatus">READY TO RUN</span></span>
-                        </div>
-                        <div class="chart-wrap">
-                            <canvas id="responseChart" aria-label="Interactive PID response graph" role="img">
-                            </canvas>
-                            <div id="chartTooltip" class="chart-tooltip" hidden>
-                            </div>
-                        </div>
-                        <div class="chart-key">
-                            <span><i class="legend-line mint"></i> Process variable (PV)</span><span><i class="legend-line dashed"></i> Setpoint (SP)</span><span><i class="legend-line orange"></i> Control output (scaled)</span>
-                        </div>
-                        <div class="metrics-grid">
-                            <div class="metric">
-                                <span>Integral absolute error</span><strong id="iaeMetric">—</strong><small>Lower is generally better</small>
-                            </div>
-                            <div class="metric">
-                                <span>Peak overshoot</span><strong id="overshootMetric">—</strong><small>Above target</small>
-                            </div>
-                            <div class="metric">
-                                <span>Settling time</span><strong id="settlingMetric">—</strong><small>Approx. within ±2%</small>
-                            </div>
-                        </div>
-                        <div class="chart-footer">
-                            <span>MODEL: FIRST-ORDER PROCESS + DEAD TIME</span><span id="sampleCount">1001 samples</span>
-                        </div>
-                    </div>
-                </div>
-            </section>
-
-
             <section class="line-section section-wrap" id="line-follower">
                 <div class="section-heading">
                     <div>
-                        <div class="eyebrow">02 / APPLICATION</div>
-                        <h2>Line-following simulator</h2>
+                        <div class="eyebrow">01 / SIMULATOR</div>
+                        <h2>PID &amp; line-following lab</h2>
                     </div>
                     <p>Tune PID on a step response, then apply the same gains on the shared track in sensor or path-aware mode.</p>
                 </div>
@@ -348,7 +231,7 @@
                 <div class="section-heading">
                     <div>
                         <div class="eyebrow">
-                            03 / THE FUNDAMENTALS
+                            02 / THE FUNDAMENTALS
                         </div>
                         <h2>
                             Three terms. One response.
@@ -406,7 +289,7 @@
                     </article>
                 </div>
                 <div class="formula-note">
-                    <span class="formula-icon"><i class="fa-solid fa-plus" aria-hidden="true"></i></span>
+                    <span class="formula-icon" aria-hidden="true">Σ</span>
                     <div>
                         <strong>Controller output</strong>
                         <p>
@@ -432,7 +315,7 @@
                             This showcase brings together the process model from <code>pid_tuning.py</code> and the sensor-based line-following ideas in your Pygame scripts.
                         </p>
                     </div>
-                    <a class="button secondary" href="#simulator">Back to the lab <i class="fa-solid fa-arrow-up" aria-hidden="true"></i></a>
+                    <a class="button secondary" href="#line-follower">Back to the lab <i class="fa-solid fa-arrow-up" aria-hidden="true"></i></a>
                 </div>
             </section>
         </main>

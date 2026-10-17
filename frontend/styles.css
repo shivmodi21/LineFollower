@@ -342,7 +342,7 @@ button, input {
     font-size: 9px
 }
 
-.sim-section, .line-section, .theory-section {
+.line-section, .theory-section {
     padding-top: 80px;
     padding-bottom: 50px;
     border-top: 1px solid rgba(154, 168, 191, .13)
@@ -370,20 +370,10 @@ button, input {
     line-height: 1.8
 }
 
-.sim-layout {
-    display: grid;
-    grid-template-columns: 330px 1fr;
-    gap: 18px
-}
-
 .panel {
     border: 1px solid var(--border);
     background: var(--panel);
     border-radius: 12px
-}
-
-.controls-panel {
-    padding: 22px
 }
 
 .panel-heading {
@@ -402,27 +392,6 @@ button, input {
 .panel-kicker {
     font-size: 9px;
     color: #8796b0
-}
-
-.quiet-button {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    background: transparent;
-    border: 0;
-    color: var(--muted);
-    font-size: 11px;
-    cursor: pointer;
-    padding: 5px
-}
-
-.quiet-button i {
-    font-size: 12px;
-    line-height: 1
-}
-
-.quiet-button:hover {
-    color: var(--mint)
 }
 
 .control-group {
@@ -503,11 +472,6 @@ input[type=range]::-moz-range-thumb {
     border-top: 1px solid var(--border)
 }
 
-.full-button {
-    width: 100%;
-    margin-top: 24px
-}
-
 .panel-note {
     font-size: 9px;
     line-height: 1.7;
@@ -521,11 +485,6 @@ input[type=range]::-moz-range-thumb {
     font-size: 15px;
     line-height: 1;
     vertical-align: -3px
-}
-
-.chart-panel {
-    padding: 22px 22px 0;
-    min-width: 0
 }
 
 .chart-heading {
@@ -545,12 +504,6 @@ input[type=range]::-moz-range-thumb {
     margin-top: 22px;
     position: relative;
     width: 100%
-}
-
-#responseChart {
-    width: 100%;
-    height: 100%;
-    display: block
 }
 
 .chart-key {
@@ -922,22 +875,6 @@ input[type=range]::-moz-range-thumb {
         gap: 35px
     }
 
-    .sim-layout {
-        grid-template-columns: 290px 1fr
-    }
-
-    .controls-panel, .chart-panel {
-        padding: 17px
-    }
-
-    .metrics-grid {
-        margin-inline: -17px
-    }
-
-    .metric {
-        padding: 13px 11px
-    }
-
     .line-copy {
         padding: 25px
     }
@@ -1014,24 +951,8 @@ input[type=range]::-moz-range-thumb {
         margin-top: 14px
     }
 
-    .sim-section, .line-section, .theory-section {
+    .line-section, .theory-section {
         padding-top: 55px
-    }
-
-    .sim-layout {
-        grid-template-columns: 1fr
-    }
-
-    .controls-panel {
-        order: 1
-    }
-
-    .chart-panel {
-        order: 0
-    }
-
-    .chart-wrap {
-        height: 260px
     }
 
     .line-layout {
@@ -1112,19 +1033,7 @@ input[type=range]::-moz-range-thumb {
         margin-left: 0
     }
 
-    .chart-panel {
-        padding: 14px
-    }
-
-    .chart-wrap {
-        height: 225px
-    }
-
-    .metrics-grid {
-        margin-inline: -14px
-    }
-
-    .metric {
+    .line-pid-metrics .metric {
         padding: 11px 8px
     }
 
@@ -1222,11 +1131,6 @@ input[type=range]::-moz-range-thumb {
 
 .button i {
     font-size: 13px;
-    line-height: 1
-}
-
-.formula-icon i {
-    font-size: 16px;
     line-height: 1
 }
 
