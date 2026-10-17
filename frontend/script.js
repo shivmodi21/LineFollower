@@ -1,732 +1,149 @@
 (() => {
-    const $ = (id) => document.getElementById(id);
-    const controls = {
-        kc: $('kc'),
-        ti: $('ti'),
-        td: $('td'),
-        target: $('target')
+  const $ = (id) => document.getElementById(id);
+  const controls = { kc: $('kc'), ti: $('ti'), td: $('td'), target: $('target') };
+  const outputs = { kc: $('kcOut'), ti: $('tiOut'), td: $('tdOut'), target: $('targetOut') };
+  const chart = $('responseChart');
+  const ctx = chart.getContext('2d');
+  const mint = '#65e6c4', orange = '#ffb36b', muted = '#9aa8bf', grid = '#273149', text = '#edf2fa';
+  let result = null;
+
+  function readSettings() { return { kc: +controls.kc.value, ti: +controls.ti.value, td: +controls.td.value, target: +controls.target.value }; }
+  function updateOutputs() { Object.keys(controls).forEach(k => outputs[k].value = k === 'kc' ? (+controls[k].value).toFixed(1) : controls[k].value); }
+
+  // Browser implementation of the first-order process and delayed controller output
+  // used by pid_tuning.py. Units are illustrative simulation time units.
+  function simulate({kc, ti, td, target}) {
+    const n = 1001, tf = 1000, dt = tf / (n - 1), processGain = 0.9, tauP = 175, delay = 15;
+    const t = [], sp = [], pv = [], op = [], pTerm = [], iTerm = [], dTerm = [];
+    let y = 23, integral = 0, previousPv = 23, iae = 0;
+    for (let i = 0; i < n; i++) {
+      const time = i * dt;
+      t.push(time);
+      sp.push(target);
+      if (i > 0) {
+        const delayedIndex = Math.max(0, i - Math.round(delay / dt));
+        const delayedOutput = op[delayedIndex] ?? 0;
+        y += dt * (-(y - 23) + processGain * delayedOutput) / tauP;
+      }
+      pv.push(y);
+      const error = target - y;
+      iae += Math.abs(error) * dt;
+      const p = kc * error;
+      const d = -kc * td * ((y - previousPv) / dt);
+      const proposedIntegral = integral + (kc / ti) * error * dt;
+      let output = p + proposedIntegral + d;
+      if (output > 100) { output = 100; }
+      else if (output < 0) { output = 0; }
+      else { integral = proposedIntegral; }
+      pTerm.push(p); iTerm.push(integral); dTerm.push(d); op.push(output);
+      previousPv = y;
+    }
+    const peak = Math.max(...pv);
+    const overshoot = Math.max(0, (peak - target) / Math.max(1, target - 23) * 100);
+    const band = Math.max(1, Math.abs(target) * .02);
+    let settling = null;
+    for (let i = 0; i < pv.length; i++) {
+      let settled = true;
+      for (let j = i; j < pv.length; j++) if (Math.abs(pv[j] - target) > band) { settled = false; break; }
+      if (settled) { settling = t[i]; break; }
+    }
+    return {t, sp, pv, op, iae, overshoot, settling, target};
+  }
+
+  function fitCanvas(canvas, context) {
+    const rect = canvas.getBoundingClientRect();
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const w = Math.max(280, rect.width), h = Math.max(180, rect.height);
+    if (canvas.width !== Math.round(w * dpr) || canvas.height !== Math.round(h * dpr)) {
+      canvas.width = Math.round(w * dpr); canvas.height = Math.round(h * dpr);
+    }
+    context.setTransform(dpr, 0, 0, dpr, 0, 0);
+    return {w, h};
+  }
+  function drawChart() {
+    const {w, h} = fitCanvas(chart, ctx);
+    ctx.clearRect(0, 0, w, h);
+    const pad = {l: 43, r: 12, t: 16, b: 31};
+    const pw = w - pad.l - pad.r, ph = h - pad.t - pad.b;
+    const maxY = Math.max(80, result ? Math.ceil(Math.max(...result.pv, ...result.sp) / 10) * 10 + 10 : 80);
+    const x = i => pad.l + (i / 1000) * pw;
+    const y = v => pad.t + ph - (v / maxY) * ph;
+    ctx.font = '10px DM Mono, monospace'; ctx.lineWidth = 1; ctx.strokeStyle = grid; ctx.fillStyle = muted;
+    for (let val = 0; val <= maxY; val += 20) {
+      ctx.beginPath(); ctx.moveTo(pad.l, y(val)); ctx.lineTo(w - pad.r, y(val)); ctx.stroke();
+      ctx.textAlign = 'right'; ctx.textBaseline = 'middle'; ctx.fillText(String(val), pad.l - 9, y(val));
+    }
+    for (let i = 0; i <= 5; i++) {
+      const xx = pad.l + pw * i / 5; ctx.beginPath(); ctx.moveTo(xx, pad.t); ctx.lineTo(xx, pad.t + ph); ctx.stroke();
+      ctx.textAlign = 'center'; ctx.textBaseline = 'top'; ctx.fillText(String(i * 200), xx, pad.t + ph + 9);
+    }
+    ctx.fillStyle = muted; ctx.textAlign = 'left'; ctx.textBaseline = 'top'; ctx.fillText('OUTPUT', pad.l, 0);
+    ctx.textAlign = 'right'; ctx.fillText('TIME', w - pad.r, h - 10);
+    if (!result) return;
+    const drawLine = (values, color, width, dash = []) => {
+      ctx.beginPath(); ctx.strokeStyle = color; ctx.lineWidth = width; ctx.setLineDash(dash);
+      values.forEach((v, i) => i ? ctx.lineTo(x(i), y(v)) : ctx.moveTo(x(i), y(v)));
+      ctx.stroke(); ctx.setLineDash([]);
     };
-    const outputs = {
-        kc: $('kcOut'),
-        ti: $('tiOut'),
-        td: $('tdOut'),
-        target: $('targetOut')
-    };
-    const chart = $('responseChart');
-    const ctx = chart.getContext('2d');
-    const mint = '#65e6c4',
-        orange = '#ffb36b',
-        muted = '#9aa8bf',
-        grid = '#273149',
-        text = '#edf2fa';
-    let result = null;
+    drawLine(result.sp, '#929db5', 1.5, [5, 5]);
+    drawLine(result.pv, mint, 2.4);
+    const opScaled = result.op.map(v => v * maxY / 100);
+    drawLine(opScaled, orange, 1.2, [3, 4]);
+  }
+  function renderMetrics() {
+    $('iaeMetric').textContent = result.iae.toLocaleString(undefined, {maximumFractionDigits: 1});
+    $('overshootMetric').textContent = result.overshoot.toFixed(1) + '%';
+    $('settlingMetric').textContent = result.settling == null ? 'Not settled' : Math.round(result.settling) + ' s';
+    $('sampleCount').textContent = result.t.length + ' samples';
+  }
+  function runSimulation() {
+    updateOutputs(); result = simulate(readSettings()); drawChart(); renderMetrics();
+    $('runStatus').textContent = 'SIMULATION COMPLETE';
+  }
+  Object.values(controls).forEach(el => el.addEventListener('input', () => { updateOutputs(); $('runStatus').textContent = 'PARAMETERS CHANGED'; }));
+  $('runBtn').addEventListener('click', runSimulation);
+  $('resetBtn').addEventListener('click', () => { controls.kc.value = 5; controls.ti.value = 60; controls.td.value = 7; controls.target.value = 60; runSimulation(); });
+  chart.addEventListener('mousemove', event => {
+    if (!result) return;
+    const rect = chart.getBoundingClientRect(), xPos = event.clientX - rect.left;
+    const index = Math.max(0, Math.min(1000, Math.round((xPos - 43) / Math.max(1, rect.width - 55) * 1000)));
+    const tip = $('chartTooltip'); tip.hidden = false;
+    tip.style.left = Math.max(0, Math.min(rect.width - 140, xPos + 12)) + 'px'; tip.style.top = '12px';
+    tip.innerHTML = `t = ${result.t[index].toFixed(0)}<br>SP = ${result.sp[index].toFixed(1)}<br>PV = ${result.pv[index].toFixed(2)}<br>Output = ${result.op[index].toFixed(1)}%`;
+  });
+  chart.addEventListener('mouseleave', () => $('chartTooltip').hidden = true);
 
-    function readSettings() {
-        return {
-            kc: +controls.kc.value,
-            ti: +controls.ti.value,
-            td: +controls.td.value,
-            target: +controls.target.value
-        };
-    }
-
-    function updateOutputs() {
-        Object.keys(controls).forEach(k => outputs[k].value = k === 'kc' ? (+controls[k].value).toFixed(1) : controls[k].value);
-    }
-
-    // The process model and PID calculations now run in FastAPI.
-    async function requestJSON(url, options, fallbackMessage) {
-        let response;
-        try {
-            response = await fetch(url, options);
-        } catch (error) {
-            throw new Error(`Cannot reach the API. Check that the backend is running and the URL is correct. (${error.message})`);
-        }
-        let data;
-        try {
-            data = await response.json();
-        } catch {
-            throw new Error(`The API returned an unreadable response (HTTP ${response.status}).`);
-        }
-        if (!response.ok) {
-            const detail = data.detail;
-            const message = Array.isArray(detail) ?
-                detail.map(item => item.msg || JSON.stringify(item)).join('; ') :
-                (typeof detail === 'string' ? detail : fallbackMessage);
-            throw new Error(message || `${fallbackMessage} (HTTP ${response.status})`);
-        }
-        return data;
-    }
-
-    async function simulate(settings) {
-        return requestJSON(`${API_BASE}/api/pid-process`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify(settings)
-        }, 'PID process simulation request failed.');
-    }
-
-    function fitCanvas(canvas, context) {
-        const rect = canvas.getBoundingClientRect();
-        const dpr = Math.min(window.devicePixelRatio || 1, 2);
-        const w = Math.max(280, rect.width),
-            h = Math.max(180, rect.height);
-        if (canvas.width !== Math.round(w * dpr) || canvas.height !== Math.round(h * dpr)) {
-            canvas.width = Math.round(w * dpr);
-            canvas.height = Math.round(h * dpr);
-        }
-        context.setTransform(dpr, 0, 0, dpr, 0, 0);
-        return {
-            w,
-            h
-        };
-    }
-
-    function drawChart() {
-        const {
-            w,
-            h
-        } = fitCanvas(chart, ctx);
-        ctx.clearRect(0, 0, w, h);
-        const pad = {
-            l: 43,
-            r: 12,
-            t: 16,
-            b: 31
-        };
-        const pw = w - pad.l - pad.r,
-            ph = h - pad.t - pad.b;
-        const maxY = Math.max(80, result ? Math.ceil(Math.max(...result.pv, ...result.sp) / 10) * 10 + 10 : 80);
-        const sampleCount = result?.t?.length || 1;
-        const x = i => pad.l + (i / Math.max(1, sampleCount - 1)) * pw;
-        const y = v => pad.t + ph - (v / maxY) * ph;
-        ctx.font = '10px DM Mono, monospace';
-        ctx.lineWidth = 1;
-        ctx.strokeStyle = grid;
-        ctx.fillStyle = muted;
-        for (let val = 0; val <= maxY; val += 20) {
-            ctx.beginPath();
-            ctx.moveTo(pad.l, y(val));
-            ctx.lineTo(w - pad.r, y(val));
-            ctx.stroke();
-            ctx.textAlign = 'right';
-            ctx.textBaseline = 'middle';
-            ctx.fillText(String(val), pad.l - 9, y(val));
-        }
-        for (let i = 0; i <= 5; i++) {
-            const xx = pad.l + pw * i / 5;
-            ctx.beginPath();
-            ctx.moveTo(xx, pad.t);
-            ctx.lineTo(xx, pad.t + ph);
-            ctx.stroke();
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'top';
-            ctx.fillText(String(i * 200), xx, pad.t + ph + 9);
-        }
-        ctx.fillStyle = muted;
-        ctx.textAlign = 'left';
-        ctx.textBaseline = 'top';
-        ctx.fillText('OUTPUT', pad.l, 0);
-        ctx.textAlign = 'right';
-        ctx.fillText('TIME', w - pad.r, h - 10);
-        if (!result) return;
-        const drawLine = (values, color, width, dash = []) => {
-            ctx.beginPath();
-            ctx.strokeStyle = color;
-            ctx.lineWidth = width;
-            ctx.setLineDash(dash);
-            values.forEach((v, i) => i ? ctx.lineTo(x(i), y(v)) : ctx.moveTo(x(i), y(v)));
-            ctx.stroke();
-            ctx.setLineDash([]);
-        };
-        drawLine(result.sp, '#929db5', 1.5, [5, 5]);
-        drawLine(result.pv, mint, 2.4);
-        const opScaled = result.op.map(v => v * maxY / 100);
-        drawLine(opScaled, orange, 1.2, [3, 4]);
-    }
-
-    function renderMetrics() {
-        $('iaeMetric').textContent = result.iae.toLocaleString(undefined, {
-            maximumFractionDigits: 1
-        });
-        $('overshootMetric').textContent = result.overshoot.toFixed(1) + '%';
-        $('settlingMetric').textContent = result.settling == null ? 'Not settled' : Math.round(result.settling) + ' s';
-        $('sampleCount').textContent = result.t.length + ' samples';
-    }
-    async function runSimulation() {
-        updateOutputs();
-        $('runBtn').disabled = true;
-        $('runStatus').textContent = 'CALCULATING…';
-        try {
-            result = await simulate(readSettings());
-            drawChart();
-            renderMetrics();
-            $('runStatus').textContent = 'SIMULATION COMPLETE';
-        } catch (error) {
-            $('runStatus').textContent = 'API ERROR';
-            $('iaeMetric').textContent = '—';
-            $('overshootMetric').textContent = '—';
-            $('settlingMetric').textContent = '—';
-            $('sampleCount').textContent = error.message || 'Could not reach API';
-        } finally {
-            $('runBtn').disabled = false;
-        }
-    }
-    Object.values(controls).forEach(el => el.addEventListener('input', () => {
-        updateOutputs();
-        $('runStatus').textContent = 'PARAMETERS CHANGED';
-    }));
-    $('runBtn').addEventListener('click', runSimulation);
-    $('resetBtn').addEventListener('click', () => {
-        controls.kc.value = 5;
-        controls.ti.value = 60;
-        controls.td.value = 7;
-        controls.target.value = 60;
-        runSimulation();
-    });
-    chart.addEventListener('mousemove', event => {
-        if (!result) return;
-        const rect = chart.getBoundingClientRect(),
-            xPos = event.clientX - rect.left;
-        const index = Math.max(0, Math.min(1000, Math.round((xPos - 43) / Math.max(1, rect.width - 55) * 1000)));
-        const tip = $('chartTooltip');
-        tip.hidden = false;
-        tip.style.left = Math.max(0, Math.min(rect.width - 140, xPos + 12)) + 'px';
-        tip.style.top = '12px';
-        tip.textContent = `t = ${result.t[index].toFixed(0)} · SP = ${result.sp[index].toFixed(1)} · PV = ${result.pv[index].toFixed(2)} · Output = ${result.op[index].toFixed(1)}%`;
-    });
-    chart.addEventListener('mouseleave', () => $('chartTooltip').hidden = true);
-
-    // Sensor simulation calculations now run in FastAPI. The browser only renders
-    // the returned frames so all sensor models share the same backend implementation.
-    const track = $('trackCanvas'),
-        tctx = track.getContext('2d');
-    let animationFrame = 0,
-        sensorFrames = [],
-        sensorFrameIndex = 0,
-        requestToken = 0;
-    let robot = {
-        x: 0,
-        y: 0,
-        heading: 0,
-        running: false,
-        step: 0,
-        integral: 0,
-        previousError: 0,
-        error: 0,
-        sensors: Array(7).fill(false)
-    };
-    const examplePath = [{
-        x: .08,
-        y: .82
-    }, {
-        x: .18,
-        y: .78
-    }, {
-        x: .28,
-        y: .66
-    }, {
-        x: .38,
-        y: .67
-    }, {
-        x: .48,
-        y: .52
-    }, {
-        x: .57,
-        y: .44
-    }, {
-        x: .67,
-        y: .49
-    }, {
-        x: .78,
-        y: .31
-    }, {
-        x: .91,
-        y: .22
-    }];
-    let path = examplePath.map(point => ({
-        ...point
-    }));
-    let drawingEnabled = false,
-        isDrawing = false;
-    const sensorKp = $('sensorKp'),
-        sensorTi = $('sensorTi'),
-        sensorTd = $('sensorTd'),
-        sensorRatio = $('sensorRatio');
-    const sensorController = $('sensorController');
-    const sensorModel = $('sensorModel');
-    const sensorWeights = {
-        '7': [-3, -2, -1, 0, 1, 2, 3],
-        '5': [-2, -1, 0, 1, 2],
-        '2': [-1, 1]
-    };
-    const sensorModelApi = {
-        '7': 'seven',
-        '5': 'five',
-        '2': 'two'
-    };
-    const API_BASE = (location.protocol === 'file:' || ['localhost', '127.0.0.1'].includes(location.hostname)) ?
-        'http://127.0.0.1:8000' : location.origin;
-
-    let environmentMode = 'sensor';
-    let telemetryHistory = [];
-    let lastSimulationMetrics = {};
-
-    function controllerGains() {
-        const kp = Number(sensorKp.value);
-        const controller = sensorController.value;
-        if (controller === 'PID Ratio') return { kp: Number(sensorRatio.value), ki: 0, kd: 0 };
-        const ti = Math.max(1, Number(sensorTi.value));
-        const td = Number(sensorTd.value);
-        return {
-            kp,
-            ki: controller === 'PID' ? kp / ti : 0,
-            kd: (controller === 'PD' || controller === 'PID') ? Math.min(100, kp * td) : 0
-        };
-    }
-
-    function updateSensorGains() {
-        $('sensorKpOut').value = (+sensorKp.value).toFixed(1);
-        $('sensorTiOut').value = sensorTi.value;
-        $('sensorTdOut').value = (+sensorTd.value).toFixed(1);
-        $('sensorRatioOut').value = (+sensorRatio.value).toFixed(1);
-        const mode = sensorController.value;
-        $('sensorTiGroup').hidden = mode !== 'PID';
-        $('sensorTdGroup').hidden = !(mode === 'PD' || mode === 'PID');
-        $('ratioGroup').hidden = mode !== 'PID Ratio';
-        $('kpGroup').hidden = mode === 'PID Ratio';
-        const hints = {
-            P: 'P reacts to current error only.',
-            PD: 'PD reacts to current error and its rate of change. Tau_D controls derivative time.',
-            PID: 'PID combines current, accumulated, and changing error. Tau_I and Tau_D control integral and derivative time constants.',
-            'PID Ratio': 'PID Ratio reproduces the ratio-style steering used in the source scripts: a single gain scales the sensor error.'
-        };
-        $('controllerHint').textContent = hints[mode];
-    }
-
-    function setEnvironment(mode) {
-        environmentMode = mode;
-        const sensor = mode === 'sensor';
-        $('sensorEnvironmentTab').classList.toggle('active', sensor);
-        $('pathEnvironmentTab').classList.toggle('active', !sensor);
-        $('sensorEnvironmentTab').setAttribute('aria-selected', String(sensor));
-        $('pathEnvironmentTab').setAttribute('aria-selected', String(!sensor));
-        $('sensorModelGroup').hidden = !sensor;
-        $('environmentTitle').textContent = sensor ? 'Sensor based control' : 'Path-aware control';
-        $('environmentDescription').textContent = sensor
-            ? 'The vehicle only sees the line through its sensors. If all sensors lose the line, it cannot directly calculate its distance from the track.'
-            : 'The vehicle knows the track geometry. It estimates cross-track error and can steer back toward the nearest point on the path even after drifting away.';
-        $('sensorReadoutLabel').textContent = sensor ? `SENSOR ARRAY · ${sensorWeights[sensorModel.value].length}` : 'PATH GEOMETRY';
-        resetSensorRobot();
-        drawTelemetryChart();
-    }
-
-    function updateSensorReadings() {
-        const bars = $('sensorBars').querySelectorAll('i');
-        bars.forEach((bar, i) => {
-            bar.hidden = i >= robot.sensors.length || environmentMode !== 'sensor';
-            bar.classList.toggle('active', !!robot.sensors[i]);
-        });
-        $('sensorReadoutLabel').textContent = environmentMode === 'sensor'
-            ? 'SENSOR ARRAY · ' + robot.sensors.length : 'PATH GEOMETRY';
-        $('errorReadout').textContent = (environmentMode === 'sensor' ? 'SENSOR ERROR: ' : 'CROSS-TRACK: ') + Number(robot.error || 0).toFixed(2);
-    }
-
-    function drawTelemetryChart() {
-        const canvas = $('lineTelemetryChart');
-        if (!canvas) return;
-        const context = canvas.getContext('2d');
-        const {w, h} = fitCanvas(canvas, context);
-        context.clearRect(0, 0, w, h);
-        context.fillStyle = '#0d1525'; context.fillRect(0, 0, w, h);
-        const left = 42, right = 12, top = 14, bottom = 28;
-        const plotW = w - left - right, plotH = h - top - bottom;
-        context.font = '10px "DM Mono", monospace'; context.fillStyle = '#9aa8bf';
-        context.strokeStyle = '#273149'; context.lineWidth = 1;
-        for (let i = 0; i <= 4; i++) {
-            const y = top + plotH * i / 4;
-            context.beginPath(); context.moveTo(left, y); context.lineTo(w-right, y); context.stroke();
-            context.fillText((2 - i).toString(), 10, y + 3);
-        }
-        context.fillText('time →', w - 52, h - 7);
-        const history = telemetryHistory.slice(-180);
-        if (history.length < 2) {
-            context.fillText('Run a simulation to plot live telemetry', left + 8, top + plotH / 2);
-            return;
-        }
-        const drawSeries = (key, color, scale) => {
-            const vals = history.map(d => Number(d[key] || 0));
-            const maxAbs = Math.max(1, ...vals.map(Math.abs));
-            context.strokeStyle = color; context.lineWidth = 1.8; context.beginPath();
-            vals.forEach((value, i) => {
-                const x = left + plotW * i / (vals.length - 1);
-                const y = top + plotH / 2 - (value / maxAbs) * plotH * .43;
-                if (i === 0) context.moveTo(x, y); else context.lineTo(x, y);
-            });
-            context.stroke();
-        };
-        drawSeries('error', '#65e6c4');
-        drawSeries('output', '#ffb36b');
-    }
-
-    function drawTrack() {
-        const {
-            w,
-            h
-        } = fitCanvas(track, tctx);
-        tctx.clearRect(0, 0, w, h);
-        tctx.fillStyle = '#111a2b';
-        tctx.fillRect(0, 0, w, h);
-        tctx.strokeStyle = '#202b41';
-        tctx.lineWidth = 1;
-        for (let xx = 0; xx < w; xx += 24) {
-            tctx.beginPath();
-            tctx.moveTo(xx, 0);
-            tctx.lineTo(xx, h);
-            tctx.stroke();
-        }
-        for (let yy = 0; yy < h; yy += 24) {
-            tctx.beginPath();
-            tctx.moveTo(0, yy);
-            tctx.lineTo(w, yy);
-            tctx.stroke();
-        }
-        const pts = path.map(p => ({
-            x: p.x * w,
-            y: p.y * h
-        }));
-        if (pts.length > 1) {
-            tctx.lineCap = 'round';
-            tctx.lineJoin = 'round';
-            tctx.strokeStyle = '#26324a';
-            tctx.lineWidth = 20;
-            tctx.beginPath();
-            pts.forEach((p, i) => i ? tctx.lineTo(p.x, p.y) : tctx.moveTo(p.x, p.y));
-            tctx.stroke();
-            tctx.strokeStyle = '#080d17';
-            tctx.lineWidth = 8;
-            tctx.beginPath();
-            pts.forEach((p, i) => i ? tctx.lineTo(p.x, p.y) : tctx.moveTo(p.x, p.y));
-            tctx.stroke();
-        } else if (pts.length === 1) {
-            tctx.beginPath();
-            tctx.arc(pts[0].x, pts[0].y, 4, 0, Math.PI * 2);
-            tctx.fillStyle = '#080d17';
-            tctx.fill();
-        }
-        if (drawingEnabled) {
-            updateSensorReadings();
-            return;
-        }
-        const weights = sensorWeights[sensorModel.value] || sensorWeights['7'];
-        const forward = {
-            x: Math.cos(robot.heading),
-            y: Math.sin(robot.heading)
-        };
-        const normal = {
-            x: -forward.y,
-            y: forward.x
-        };
-        const cx = robot.x * w,
-            cy = robot.y * h;
-        tctx.save();
-        tctx.translate(cx, cy);
-        tctx.rotate(robot.heading);
-        tctx.fillStyle = '#65e6c4';
-        tctx.strokeStyle = '#b5ffec';
-        tctx.lineWidth = 1.5;
-        tctx.beginPath();
-        tctx.roundRect(-17, -11, 34, 22, 5);
-        tctx.fill();
-        tctx.stroke();
-        tctx.fillStyle = '#10251f';
-        tctx.beginPath();
-        tctx.moveTo(10, 0);
-        tctx.lineTo(2, -5);
-        tctx.lineTo(2, 5);
-        tctx.closePath();
-        tctx.fill();
-        tctx.restore();
-        const sensorX = cx + forward.x * 13,
-            sensorY = cy + forward.y * 13;
-        if (environmentMode === 'sensor') weights.forEach((weight, i) => {
-            const x = sensorX + normal.x * weight * 5.2,
-                y = sensorY + normal.y * weight * 5.2;
-            tctx.beginPath();
-            tctx.arc(x, y, 3.1, 0, Math.PI * 2);
-            tctx.fillStyle = robot.sensors[i] ? '#65e6c4' : '#53617a';
-            tctx.fill();
-            tctx.strokeStyle = '#0b1020';
-            tctx.lineWidth = .7;
-            tctx.stroke();
-        });
-        updateSensorReadings();
-    }
-
-    function resetSensorRobot() {
-        requestToken++;
-        robot.running = false;
-        cancelAnimationFrame(animationFrame);
-        sensorFrames = [];
-        sensorFrameIndex = 0;
-        telemetryHistory = [];
-        lastSimulationMetrics = {};
-        $('lineErrorMetric').textContent = '—';
-        $('lineOutputMetric').textContent = '—';
-        $('lineStepsMetric').textContent = '0';
-        $('lineLostMetric').textContent = '0';
-        $('linePlotStatus').textContent = 'READY TO RUN';
-        if (path.length >= 2) {
-            const a = path[0],
-                b = path[1];
-            robot = {
-                x: a.x,
-                y: a.y,
-                heading: Math.atan2((b.y - a.y) * track.height, (b.x - a.x) * track.width),
-                running: false,
-                step: 0,
-                integral: 0,
-                previousError: 0,
-                error: 0,
-                sensors: Array(sensorWeights[sensorModel.value].length).fill(false)
-            };
-            $('robotState').textContent = drawingEnabled ? 'DRAW MODE' : 'READY';
-        } else {
-            robot = {
-                x: 0,
-                y: 0,
-                heading: 0,
-                running: false,
-                step: 0,
-                integral: 0,
-                previousError: 0,
-                error: 0,
-                sensors: Array(sensorWeights[sensorModel.value].length).fill(false)
-            };
-            $('robotState').textContent = drawingEnabled ? 'DRAW MODE' : 'NO TRACK';
-        }
-        $('animateRobot').disabled = drawingEnabled || path.length < 2;
-        $('animateRobot').innerHTML = 'Run simulation <i class="fa-solid fa-play" aria-hidden="true"></i>';
-        updateSensorReadings();
-        drawTrack();
-        drawTelemetryChart();
-    }
-
-    function animateSensorFrames(token) {
-        if (token !== requestToken || !robot.running) return;
-        if (sensorFrameIndex >= sensorFrames.length) {
-            robot.running = false;
-            $('robotState').textContent = 'COMPLETE';
-            $('linePlotStatus').textContent = 'SIMULATION COMPLETE';
-            $('lineLostMetric').textContent = String(lastSimulationMetrics.lost_line_steps ?? lastSimulationMetrics.lost_track_steps ?? 0);
-            $('animateRobot').innerHTML = 'Run again <i class="fa-solid fa-play" aria-hidden="true"></i>';
-            return;
-        }
-        const frame = sensorFrames[sensorFrameIndex++];
-        robot = {
-            ...robot,
-            ...frame,
-            running: true,
-            step: frame.step,
-            sensors: frame.sensors || robot.sensors || []
-        };
-        telemetryHistory.push({ error: Number(frame.error ?? frame.cross_track_error ?? 0), output: Number(frame.steering ?? 0) });
-        $('lineErrorMetric').textContent = Number(frame.error ?? frame.cross_track_error ?? 0).toFixed(3);
-        $('lineOutputMetric').textContent = Number(frame.steering ?? 0).toFixed(4);
-        $('lineStepsMetric').textContent = String(frame.step ?? sensorFrameIndex);
-        $('linePlotStatus').textContent = 'RUNNING';
-        drawTrack();
-        drawTelemetryChart();
-        animationFrame = requestAnimationFrame(() => animateSensorFrames(token));
-    }
-    async function runSensorSimulation() {
-        if (robot.running || drawingEnabled) return;
-        if (path.length < 2 || pathLength(path) < 8) {
-            $('robotState').textContent = 'TRACK TOO SHORT';
-            $('drawHint').textContent = 'Draw a longer continuous path before running the robot.';
-            return;
-        }
-        const token = ++requestToken;
-        robot.running = false;
-        cancelAnimationFrame(animationFrame);
-        telemetryHistory = [];
-        lastSimulationMetrics = {};
-        $('lineErrorMetric').textContent = '—'; $('lineOutputMetric').textContent = '—';
-        $('lineStepsMetric').textContent = '0'; $('lineLostMetric').textContent = '0';
-        $('linePlotStatus').textContent = 'CALCULATING…';
-        $('robotState').textContent = 'CALCULATING';
-        $('animateRobot').disabled = true;
-        $('animateRobot').innerHTML = 'Calculating… <i class="fa-solid fa-spinner fa-spin" aria-hidden="true"></i>';
-        const {w, h} = fitCanvas(track, tctx);
-        const gains = controllerGains();
-        const controller = sensorController.value;
-        const payload = {
-            path,
-            sensor_model: sensorModelApi[sensorModel.value],
-            controller,
-            pid: gains,
-            canvas_width: Math.max(120, Math.round(w)),
-            canvas_height: Math.max(120, Math.round(h)),
-            speed: 1.45,
-            max_steps: 2200
-        };
-        try {
-            let data;
-            if (environmentMode === 'sensor') {
-                data = await requestJSON(`${API_BASE}/api/sensor-simulate`, {
-                    method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload)
-                }, 'Sensor simulation request failed.');
-            } else {
-                const pixelPath = path.map(point => ({x: point.x * w, y: point.y * h}));
-                data = await requestJSON(`${API_BASE}/api/simulate`, {
-                    method: 'POST', headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({path: pixelPath, pid: gains, speed: 2, max_steps: 2200, lookahead: 24})
-                }, 'Path-aware simulation request failed.');
-                data.frames = (data.frames || []).map(frame => ({
-                    ...frame, x: frame.x / w, y: frame.y / h,
-                    error: frame.cross_track_error ?? frame.error,
-                    sensors: []
-                }));
-            }
-            if (token !== requestToken) return;
-            sensorFrames = data.frames || [];
-            lastSimulationMetrics = data.metrics || {};
-            if (!sensorFrames.length) throw new Error('The backend returned no simulation frames.');
-            $('lineLostMetric').textContent = String(lastSimulationMetrics.lost_line_steps ?? lastSimulationMetrics.lost_track_steps ?? 0);
-            sensorFrameIndex = 0;
-            $('robotState').textContent = 'RUNNING';
-            $('linePlotStatus').textContent = 'RUNNING';
-            $('animateRobot').innerHTML = 'Running… <i class="fa-solid fa-spinner fa-spin" aria-hidden="true"></i>';
-            robot.running = true;
-            animateSensorFrames(token);
-        } catch (error) {
-            if (token !== requestToken) return;
-            $('robotState').textContent = 'API ERROR';
-            $('linePlotStatus').textContent = 'API ERROR';
-            $('animateRobot').innerHTML = 'Retry simulation <i class="fa-solid fa-rotate-right" aria-hidden="true"></i>';
-            $('environmentDescription').textContent = `Simulation failed: ${error.message}. Check that FastAPI is running and the API URL is correct.`;
-        } finally {
-            if (token === requestToken) $('animateRobot').disabled = false;
-        }
-    }
-
-    function pathLength(points) {
-        return points.slice(1).reduce((total, point, index) => total + Math.hypot((point.x - points[index].x) * track.clientWidth, (point.y - points[index].y) * track.clientHeight), 0);
-    }
-
-    function setDrawingMode(enabled) {
-        drawingEnabled = enabled;
-        $('drawTrackBtn').innerHTML = enabled ? '<i class="fa-solid fa-check" aria-hidden="true"></i> Finish drawing' : '<i class="fa-solid fa-pencil" aria-hidden="true"></i> Draw track';
-        $('drawTrackBtn').classList.toggle('primary', enabled);
-        $('drawTrackBtn').classList.toggle('secondary', !enabled);
-        track.classList.toggle('drawing', enabled);
-        $('animateRobot').disabled = enabled || path.length < 2;
-        $('exampleTrackBtn').disabled = enabled;
-        $('clearTrackBtn').disabled = enabled;
-        $('drawHint').textContent = enabled ? 'Drag on the canvas with your mouse or finger to draw one continuous black line. Select “Finish drawing” when done.' : 'Choose “Draw track” to edit the path, or run the robot on the current track.';
-        $('robotState').textContent = enabled ? 'DRAW MODE' : (path.length >= 2 ? 'READY' : 'NO TRACK');
-    }
-
-    function canvasPoint(event) {
-        const rect = track.getBoundingClientRect();
-        return {
-            x: Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width)),
-            y: Math.max(0, Math.min(1, (event.clientY - rect.top) / rect.height))
-        };
-    }
-    $('drawTrackBtn').addEventListener('click', () => {
-        if (drawingEnabled) {
-            isDrawing = false;
-            setDrawingMode(false);
-            if (path.length < 2 || pathLength(path) < 8) {
-                $('drawHint').textContent = 'That path is too short. Choose “Draw track” and draw a longer line.';
-                $('animateRobot').disabled = true;
-                $('robotState').textContent = 'TRACK TOO SHORT';
-                return;
-            }
-            resetSensorRobot();
-            $('drawHint').textContent = 'Track saved. Run the simulation to make the robot follow your path.';
-        } else {
-            requestToken++;
-            robot.running = false;
-            cancelAnimationFrame(animationFrame);
-            path = [];
-            isDrawing = false;
-            setDrawingMode(true);
-            resetSensorRobot();
-            drawTrack();
-        }
-    });
-    track.addEventListener('pointerdown', event => {
-        if (!drawingEnabled) return;
-        event.preventDefault();
-        track.setPointerCapture?.(event.pointerId);
-        isDrawing = true;
-        path = [canvasPoint(event)];
-        drawTrack();
-    });
-    track.addEventListener('pointermove', event => {
-        if (!drawingEnabled || !isDrawing) return;
-        const point = canvasPoint(event),
-            previous = path[path.length - 1];
-        const distance = Math.hypot((point.x - previous.x) * track.clientWidth, (point.y - previous.y) * track.clientHeight);
-        if (distance >= 2) {
-            path.push(point);
-            if (path.length > 2000) path = path.filter((_, index) => index % 2 === 0);
-            drawTrack();
-        }
-    });
-
-    function finishPointerDrawing() {
-        if (!isDrawing) return;
-        isDrawing = false;
-        drawTrack();
-    }
-    track.addEventListener('pointerup', finishPointerDrawing);
-    track.addEventListener('pointercancel', finishPointerDrawing);
-    $('exampleTrackBtn').addEventListener('click', () => {
-        setDrawingMode(false);
-        path = examplePath.map(point => ({
-            ...point
-        }));
-        $('drawHint').textContent = 'Example track loaded. You can run it or draw a custom path.';
-        resetSensorRobot();
-    });
-    $('clearTrackBtn').addEventListener('click', () => {
-        setDrawingMode(false);
-        path = [];
-        $('drawHint').textContent = 'Track cleared. Choose “Draw track” and draw a path before running the robot.';
-        resetSensorRobot();
-    });
-    $('animateRobot').addEventListener('click', runSensorSimulation);
-    $('resetRobot').addEventListener('click', resetSensorRobot);
-    [sensorKp, sensorTi, sensorTd, sensorRatio].forEach(el => el.addEventListener('input', updateSensorGains));
-    sensorController.addEventListener('change', updateSensorGains);
-    $('sensorEnvironmentTab').addEventListener('click', () => setEnvironment('sensor'));
-    $('pathEnvironmentTab').addEventListener('click', () => setEnvironment('path'));
-    sensorModel.addEventListener('change', () => {
-        resetSensorRobot();
-        const n = sensorWeights[sensorModel.value].length;
-        $('trackCanvas').setAttribute('aria-label', `Animated line-following robot with ${n} sensors`);
-        updateSensorReadings();
-        drawTrack();
-    });
-    if ('ResizeObserver' in window) {
-        new ResizeObserver(() => {
-            drawChart();
-            drawTrack();
-            drawTelemetryChart();
-        }).observe(chart.parentElement);
-    } else window.addEventListener('resize', () => {
-        drawChart();
-        drawTrack();
-        drawTelemetryChart();
-    });
-    updateOutputs();
-    runSimulation();
-    updateSensorGains();
-    setEnvironment('sensor');
-    resetSensorRobot();
+  // Seven-sensor illustrative line-following animation, inspired by the uploaded source.
+  const track = $('trackCanvas'), tctx = track.getContext('2d');
+  let animationFrame = 0, robot = {s: 0, running: false};
+  const path = [{x:.08,y:.82},{x:.18,y:.78},{x:.28,y:.66},{x:.38,y:.67},{x:.48,y:.52},{x:.57,y:.44},{x:.67,y:.49},{x:.78,y:.31},{x:.91,y:.22}];
+  function pointOnPath(s) {
+    const lengths = []; let total = 0;
+    for (let i=1;i<path.length;i++){const dx=path[i].x-path[i-1].x,dy=path[i].y-path[i-1].y;total+=Math.hypot(dx,dy);lengths.push(total);}
+    const target = s * total; let prev = 0;
+    for (let i=0;i<lengths.length;i++){if(target<=lengths[i]){const f=(target-prev)/(lengths[i]-prev);return {x:path[i].x+(path[i+1].x-path[i].x)*f,y:path[i].y+(path[i+1].y-path[i].y)*f,angle:Math.atan2(path[i+1].y-path[i].y,path[i+1].x-path[i].x)};}prev=lengths[i];}
+    const a=path[path.length-2],b=path[path.length-1];return {x:b.x,y:b.y,angle:Math.atan2(b.y-a.y,b.x-a.x)};
+  }
+  function drawTrack() {
+    const {w,h}=fitCanvas(track,tctx); tctx.clearRect(0,0,w,h); tctx.fillStyle='#111a2b';tctx.fillRect(0,0,w,h);
+    tctx.strokeStyle='#202b41';tctx.lineWidth=1;
+    for(let xx=0;xx<w;xx+=24){tctx.beginPath();tctx.moveTo(xx,0);tctx.lineTo(xx,h);tctx.stroke();}for(let yy=0;yy<h;yy+=24){tctx.beginPath();tctx.moveTo(0,yy);tctx.lineTo(w,yy);tctx.stroke();}
+    const pts=path.map(p=>({x:p.x*w,y:p.y*h}));
+    tctx.lineCap='round';tctx.lineJoin='round';tctx.strokeStyle='#26324a';tctx.lineWidth=20;tctx.beginPath();pts.forEach((p,i)=>i?tctx.lineTo(p.x,p.y):tctx.moveTo(p.x,p.y));tctx.stroke();
+    tctx.strokeStyle='#65e6c4';tctx.globalAlpha=.12;tctx.lineWidth=2;tctx.stroke();tctx.globalAlpha=1;
+    tctx.strokeStyle='#080d17';tctx.lineWidth=8;tctx.beginPath();pts.forEach((p,i)=>i?tctx.lineTo(p.x,p.y):tctx.moveTo(p.x,p.y));tctx.stroke();
+    const pos=pointOnPath(robot.s),cx=pos.x*w,cy=pos.y*h,angle=pos.angle;
+    tctx.save();tctx.translate(cx,cy);tctx.rotate(angle);tctx.fillStyle='#65e6c4';tctx.strokeStyle='#b5ffec';tctx.lineWidth=1.5;tctx.beginPath();tctx.roundRect(-18,-12,36,24,6);tctx.fill();tctx.stroke();
+    tctx.fillStyle='#10251f';tctx.beginPath();tctx.moveTo(9,0);tctx.lineTo(1,-5);tctx.lineTo(1,5);tctx.closePath();tctx.fill();
+    const active = Math.min(6, Math.max(0, Math.round(3 + Math.sin(robot.s*17)*2)));
+    for(let i=0;i<7;i++){const sx=-13+i*4.3,sy=17;tctx.fillStyle=i===active||i===active-1||i===active+1?mint:'#53617a';tctx.beginPath();tctx.arc(sx,sy,2.2,0,Math.PI*2);tctx.fill();}
+    tctx.restore();
+    $('sensorBars').querySelectorAll('i').forEach((bar,i)=>bar.classList.toggle('active',Math.abs(i- (Math.min(6,Math.max(0,Math.round(3+Math.sin(robot.s*17)*2)))))<=1));
+    $('errorReadout').textContent='ERROR: '+(Math.sin(robot.s*17)*0.65).toFixed(2);
+    if(robot.running){robot.s+=.0018;if(robot.s>=1){robot.s=0;}animationFrame=requestAnimationFrame(drawTrack);}
+  }
+  $('animateRobot').addEventListener('click',()=>{if(robot.running)return;robot.running=true;$('robotState').textContent='RUNNING';$('animateRobot').innerHTML='Running… <span>Ⅱ</span>';drawTrack();});
+  $('resetRobot').addEventListener('click',()=>{robot.running=false;cancelAnimationFrame(animationFrame);robot.s=0;$('robotState').textContent='IDLE';$('animateRobot').innerHTML='Run demo <span>▶</span>';drawTrack();});
+  if ('ResizeObserver' in window) { new ResizeObserver(() => { drawChart(); drawTrack(); }).observe(chart.parentElement); } else window.addEventListener('resize',()=>{drawChart();drawTrack();});
+  updateOutputs(); runSimulation(); drawTrack();
 })();
