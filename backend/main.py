@@ -7,10 +7,6 @@ from __future__ import annotations
 
 import math
 from typing import Literal
-from pathlib import Path
-
-from fastapi.responses import FileResponse
-from fastapi.staticfiles import StaticFiles
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -33,8 +29,8 @@ app.add_middleware(
 DEFAULT_PID = {"kp": 5.0, "ki": 0.0, "kd": 0.0}
 SENSOR_WEIGHTS = {
     "seven": [-3, -2, -1, 0, 1, 2, 3],
-    "five": [-2, -1, 0, 1, 2],
     "two": [-1, 1],
+    "single": [-1.8],
 }
 
 
@@ -66,8 +62,8 @@ class SimulationRequest(BaseModel):
 class SensorSimulationRequest(BaseModel):
     # Normalized points keep the API independent of browser canvas dimensions.
     path: list[Point] = Field(min_length=2, max_length=2000)
-    sensor_model: Literal["seven", "five", "two"] = "seven"
-    controller: Literal["P", "PD", "PID", "PID Ratio"] = "PID"
+    sensor_model: Literal["seven", "two", "single"] = "seven"
+    controller: Literal["P", "PD", "PID"] = "P"
     pid: PIDGains = Field(default_factory=PIDGains)
     canvas_width: int = Field(default=640, ge=120, le=2000)
     canvas_height: int = Field(default=360, ge=120, le=2000)
@@ -81,17 +77,6 @@ class SensorSimulationRequest(BaseModel):
         if any(p.x > 1 or p.y > 1 for p in self.path):
             raise ValueError("Sensor simulation path coordinates must be normalized between 0 and 1.")
         return self
-
-
-
-class ProcessPIDRequest(BaseModel):
-    """Parameters for the first-order process PID experiment."""
-    kc: float = Field(default=5.0, ge=0.1, le=15.0)
-    ti: float = Field(default=60.0, ge=5.0, le=180.0)
-    td: float = Field(default=7.0, ge=0.0, le=30.0)
-    target: float = Field(default=60.0, ge=25.0, le=80.0)
-    samples: int = Field(default=1001, ge=101, le=2001)
-
 
 
 def _distance(a: Point, b: Point) -> float:
@@ -152,10 +137,6 @@ def _point_segment_distance(px, py, ax, ay, bx, by):
 
 @app.get("/")
 def root():
-    """Serve the frontend on the same origin in production, when available."""
-    index_file = Path(__file__).resolve().parent.parent / "frontend" / "index.html"
-    if index_file.is_file():
-        return FileResponse(index_file)
     return {"name": "LineFollower PID API", "status": "ok", "docs": "/docs"}
 
 
@@ -273,6 +254,9 @@ def sensor_simulate(request: SensorSimulationRequest):
             elif detected[0]: error = -1.8
             elif detected[1]: error = 1.8
             else: error = 0.0 if prev_error == 0 else math.copysign(2.8, prev_error)
+        elif request.sensor_model == "single":
+            if detected[0]: error = -0.75
+            else: error = 1.6 if prev_error == 0 else math.copysign(2.2, prev_error)
         elif active == 0:
             error = 0.0 if prev_error == 0 else math.copysign(3.0, prev_error)
         else:
@@ -286,8 +270,6 @@ def sensor_simulate(request: SensorSimulationRequest):
         p_term = request.pid.kp * error
         i_term = request.pid.ki * integral if request.controller == "PID" else 0.0
         d_term = request.pid.kd * derivative if request.controller in ("PD", "PID") else 0.0
-        if request.controller == "PID Ratio":
-            i_term = d_term = 0.0
         output = p_term + i_term + d_term
         steering = max(-0.18, min(0.18, output * 0.012))
         heading = _wrap_angle(heading + steering)
@@ -307,77 +289,3 @@ def sensor_simulate(request: SensorSimulationRequest):
             "pid": request.pid.model_dump(), "frames": frames,
             "metrics": {"steps": len(frames), "frames": len(frames), "lost_line_steps": lost_line_steps,
                         "stopped_at_boundary": bool(frames and (frames[-1]["x"] < -0.02 or frames[-1]["x"] > 1.02 or frames[-1]["y"] < -0.02 or frames[-1]["y"] > 1.02))}}
-
-
-@app.post("/api/pid-process")
-def pid_process(request: ProcessPIDRequest):
-    """Run the first-order process response experiment on the backend.
-
-    This follows the model used in the project's pid_tuning.py: process gain
-    0.9, process time constant 175, nominal PV 23, output delay 15, and
-    controller output constrained to 0..100 with integral anti-windup.
-    """
-    n = request.samples
-    tf = 1000.0
-    dt = tf / (n - 1)
-    process_gain, tau_p, delay = 0.9, 175.0, 15.0
-    delay_steps = max(0, round(delay / dt))
-    t, sp, pv, op = [], [], [], []
-    p_term, i_term, d_term = [], [], []
-    y, integral, previous_pv, iae = 23.0, 0.0, 23.0, 0.0
-
-    for index in range(n):
-        time = index * dt
-        t.append(time)
-        sp.append(request.target)
-        if index > 0:
-            delayed_index = max(0, index - delay_steps)
-            delayed_output = op[delayed_index] if delayed_index < len(op) else 0.0
-            y += dt * (-(y - 23.0) + process_gain * delayed_output) / tau_p
-        pv.append(y)
-        error = request.target - y
-        iae += abs(error) * dt
-        p = request.kc * error
-        d = -request.kc * request.td * ((y - previous_pv) / dt)
-        proposed_integral = integral + (request.kc / request.ti) * error * dt
-        output = p + proposed_integral + d
-        if output > 100.0:
-            output = 100.0
-        elif output < 0.0:
-            output = 0.0
-        else:
-            integral = proposed_integral
-        p_term.append(p)
-        i_term.append(integral)
-        d_term.append(d)
-        op.append(output)
-        previous_pv = y
-
-    peak = max(pv)
-    overshoot = max(0.0, (peak - request.target) / max(1.0, request.target - 23.0) * 100.0)
-    band = max(1.0, abs(request.target) * 0.02)
-    settling = None
-    # Find the first sample after which PV stays inside the settling band.
-    outside_count = 0
-    for idx in range(n - 1, -1, -1):
-        if abs(pv[idx] - request.target) > band:
-            outside_count = idx + 1
-            break
-    if outside_count < n:
-        settling = t[outside_count] if outside_count < n else None
-    return {
-        "t": t, "sp": sp, "pv": pv, "op": op,
-        "p_term": p_term, "i_term": i_term, "d_term": d_term,
-        "iae": round(iae, 6), "overshoot": round(overshoot, 6),
-        "settling": settling, "target": request.target,
-        "parameters": request.model_dump(),
-        "model": {"process_gain": process_gain, "time_constant": tau_p,
-                  "dead_time": delay, "nominal_value": 23.0}
-    }
-
-
-# Serve CSS and JavaScript from the same Render service as the API. This keeps
-# API_BASE=location.origin valid for the recommended single-service deployment.
-_FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
-if _FRONTEND_DIR.is_dir():
-    app.mount("/", StaticFiles(directory=_FRONTEND_DIR, html=True), name="frontend")

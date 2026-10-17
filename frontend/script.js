@@ -113,16 +113,20 @@
   });
   chart.addEventListener('mouseleave', () => $('chartTooltip').hidden = true);
 
-  // Seven-sensor line-following simulation inspired by myLineFollower.py.
-  // The sensors sample the drawn track; controller output changes the robot heading.
+  // Sensor simulation calculations now run in FastAPI. The browser only renders
+  // the returned frames so all sensor models share the same backend implementation.
   const track = $('trackCanvas'), tctx = track.getContext('2d');
-  let animationFrame = 0;
-  let robot = {x: 0, y: 0, heading: 0, running: false, step: 0, integral: 0, previousError: 0, error: 0, sensors: Array(7).fill(false)};
+  let animationFrame = 0, sensorFrames = [], sensorFrameIndex = 0, requestToken = 0;
+  let robot = {x:0,y:0,heading:0,running:false,step:0,integral:0,previousError:0,error:0,sensors:Array(7).fill(false)};
   const path = [{x:.08,y:.82},{x:.18,y:.78},{x:.28,y:.66},{x:.38,y:.67},{x:.48,y:.52},{x:.57,y:.44},{x:.67,y:.49},{x:.78,y:.31},{x:.91,y:.22}];
   const sensorKp = $('sensorKp'), sensorKi = $('sensorKi'), sensorKd = $('sensorKd');
   const sensorController = $('sensorController');
   const sensorModel = $('sensorModel');
   const sensorWeights = { '7': [-3,-2,-1,0,1,2,3], '2': [-1,1], '1': [-1.8] };
+  const sensorModelApi = { '7':'seven', '2':'two', '1':'single' };
+  const API_BASE = (location.protocol === 'file:' || ['localhost','127.0.0.1'].includes(location.hostname))
+    ? 'http://127.0.0.1:8000' : location.origin;
+
   function updateSensorGains() {
     $('sensorKpOut').value = (+sensorKp.value).toFixed(1);
     $('sensorKiOut').value = (+sensorKi.value).toFixed(2);
@@ -131,65 +135,18 @@
     $('sensorKiGroup').style.opacity = mode === 'PID' ? '1' : '.45';
     $('sensorKdGroup').style.opacity = mode === 'P' ? '.45' : '1';
   }
-  function resetSensorRobot() {
-    robot.running = false; cancelAnimationFrame(animationFrame);
-    const a=path[0], b=path[1];
-    robot={x:a.x,y:a.y,heading:Math.atan2((b.y-a.y), (b.x-a.x)),running:false,step:0,integral:0,previousError:0,error:0,sensors:Array(sensorWeights[sensorModel.value].length).fill(false)};
-    $('robotState').textContent='READY'; $('animateRobot').innerHTML='Run simulation <span>▶</span>';
-    updateSensorReadings(); drawTrack();
-  }
-  function pointSegmentDistance(px,py,ax,ay,bx,by) {
-    const dx=bx-ax,dy=by-ay,den=dx*dx+dy*dy;
-    const t=den ? Math.max(0,Math.min(1,((px-ax)*dx+(py-ay)*dy)/den)) : 0;
-    return Math.hypot(px-(ax+t*dx),py-(ay+t*dy));
-  }
-  function sensorSample() {
-    const {w,h}=fitCanvas(track,tctx), px=robot.x*w, py=robot.y*h;
-    const forward={x:Math.cos(robot.heading),y:Math.sin(robot.heading)};
-    const normal={x:-forward.y,y:forward.x};
-    const weights=sensorWeights[sensorModel.value], detected=[];
-    const sx=px+forward.x*13, sy=py+forward.y*13;
-    for(const weight of weights){
-      const x=sx+normal.x*weight*5.2, y=sy+normal.y*weight*5.2;
-      let nearest=Infinity;
-      for(let i=1;i<path.length;i++) nearest=Math.min(nearest,pointSegmentDistance(x,y,path[i-1].x*w,path[i-1].y*h,path[i].x*w,path[i].y*h));
-      detected.push(nearest<=5.5);
-    }
-    robot.sensors=detected;
-    const active=weights.reduce((sum,weight,i)=>sum+(detected[i]?1:0),0);
-    if (sensorModel.value === '2') {
-      // Two-sensor rule tracker: both on line = centered; one active = steer toward it.
-      if (detected[0] && detected[1]) robot.error = 0;
-      else if (detected[0]) robot.error = -1.8;
-      else if (detected[1]) robot.error = 1.8;
-      else robot.error = robot.previousError === 0 ? 0 : Math.sign(robot.previousError)*2.8;
-    } else if (sensorModel.value === '1') {
-      // Single offset sensor follows one edge: switch correction based on whether
-      // the sensor sees the line, retaining the last search direction when it does not.
-      if (detected[0]) robot.error = -0.75;
-      else robot.error = robot.previousError === 0 ? 1.6 : Math.sign(robot.previousError)*2.2;
-    } else if (!active) {
-      // Seven-sensor weighted array: briefly retain the last direction to search.
-      robot.error = robot.previousError === 0 ? 0 : Math.sign(robot.previousError)*3;
-    } else {
-      robot.error=weights.reduce((sum,weight,i)=>sum+(detected[i]?weight:0),0)/active;
-    }
-    return {w,h,forward,normal,sx,sy,weights};
-  }
   function updateSensorReadings(){
     const bars=$('sensorBars').querySelectorAll('i');
     bars.forEach((bar,i)=>{
-      const modelWeights=sensorWeights[sensorModel.value];
-      const used=i<modelWeights.length;
-      bar.hidden=!used;
+      bar.hidden=i>=robot.sensors.length;
       bar.classList.toggle('active',!!robot.sensors[i]);
     });
-    $('sensorReadoutLabel').textContent='SENSOR ARRAY · '+sensorWeights[sensorModel.value].length;
-    $('errorReadout').textContent='ERROR: '+robot.error.toFixed(2);
+    $('sensorReadoutLabel').textContent='SENSOR ARRAY · '+robot.sensors.length;
+    $('errorReadout').textContent='ERROR: '+Number(robot.error || 0).toFixed(2);
     const notes={
-      '7':'Seven sensors estimate line position using a weighted average. P, PD, and PID modes are available.',
-      '2':'Two sensors use simple rules: both detect the line means centered; a single detection steers toward that side.',
-      '1':'A single offset sensor demonstrates edge tracking. It follows one edge and uses a simple search correction when the line is lost.'
+      '7':'Seven sensors estimate line position using a weighted average. Sensor and controller calculations run on the backend.',
+      '2':'Two sensors use rule-based steering. Sensor states and steering are calculated by the backend.',
+      '1':'A single offset sensor demonstrates edge tracking. Sensor states and steering are calculated by the backend.'
     };
     $('sensorModelNote').textContent=notes[sensorModel.value];
   }
@@ -201,51 +158,83 @@
     const pts=path.map(p=>({x:p.x*w,y:p.y*h}));
     tctx.lineCap='round';tctx.lineJoin='round';tctx.strokeStyle='#26324a';tctx.lineWidth=20;tctx.beginPath();pts.forEach((p,i)=>i?tctx.lineTo(p.x,p.y):tctx.moveTo(p.x,p.y));tctx.stroke();
     tctx.strokeStyle='#080d17';tctx.lineWidth=8;tctx.beginPath();pts.forEach((p,i)=>i?tctx.lineTo(p.x,p.y):tctx.moveTo(p.x,p.y));tctx.stroke();
-    const {w:sw,h:sh,forward,normal,sx,sy,weights}=sensorSample();
-    const cx=robot.x*sw,cy=robot.y*sh;
+    const weights=sensorWeights[sensorModel.value] || sensorWeights['7'];
+    const forward={x:Math.cos(robot.heading),y:Math.sin(robot.heading)};
+    const normal={x:-forward.y,y:forward.x};
+    const cx=robot.x*w,cy=robot.y*h;
     tctx.save();tctx.translate(cx,cy);tctx.rotate(robot.heading);
     tctx.fillStyle='#65e6c4';tctx.strokeStyle='#b5ffec';tctx.lineWidth=1.5;tctx.beginPath();tctx.roundRect(-17,-11,34,22,5);tctx.fill();tctx.stroke();
     tctx.fillStyle='#10251f';tctx.beginPath();tctx.moveTo(10,0);tctx.lineTo(2,-5);tctx.lineTo(2,5);tctx.closePath();tctx.fill();tctx.restore();
-    // Draw the seven sensing points in world coordinates.
     const sensorX=cx+forward.x*13, sensorY=cy+forward.y*13;
     weights.forEach((weight,i)=>{const x=sensorX+normal.x*weight*5.2,y=sensorY+normal.y*weight*5.2;tctx.beginPath();tctx.arc(x,y,3.1,0,Math.PI*2);tctx.fillStyle=robot.sensors[i]?'#65e6c4':'#53617a';tctx.fill();tctx.strokeStyle='#0b1020';tctx.lineWidth=.7;tctx.stroke();});
     updateSensorReadings();
   }
-  function simulationTick(){
-    if(!robot.running)return;
-    const sample=sensorSample(), mode=sensorController.value;
-    const error=robot.error;
-    robot.integral=Math.max(-20,Math.min(20,robot.integral+error));
-    const derivative=error-robot.previousError;
-    const p=Number(sensorKp.value)*error;
-    const i=mode==='PID'?Number(sensorKi.value)*robot.integral:0;
-    const d=mode==='P'?0:Number(sensorKd.value)*derivative;
-    const output=p+i+d;
-    // Positive sensor error means the line is to the robot's right in screen coordinates.
-    robot.heading += Math.max(-0.18,Math.min(0.18,output*0.012));
-    const speed=1.45;
-    robot.x += Math.cos(robot.heading)*speed/sample.w;
-    robot.y += Math.sin(robot.heading)*speed/sample.h;
-    robot.previousError=error; robot.step++;
-    if(robot.x<-.02||robot.x>1.02||robot.y<-.02||robot.y>1.02||robot.step>2200){
-      robot.running=false;$('robotState').textContent='STOPPED';$('animateRobot').innerHTML='Run again <span>▶</span>';drawTrack();return;
-    }
-    drawTrack(); animationFrame=requestAnimationFrame(simulationTick);
+  function resetSensorRobot() {
+    requestToken++;
+    robot.running=false; cancelAnimationFrame(animationFrame);
+    sensorFrames=[]; sensorFrameIndex=0;
+    const a=path[0], b=path[1];
+    robot={x:a.x,y:a.y,heading:Math.atan2((b.y-a.y)*track.height,(b.x-a.x)*track.width),running:false,step:0,integral:0,previousError:0,error:0,sensors:Array(sensorWeights[sensorModel.value].length).fill(false)};
+    $('robotState').textContent='READY'; $('animateRobot').innerHTML='Run simulation <span>▶</span>';
+    updateSensorReadings(); drawTrack();
   }
-  $('animateRobot').addEventListener('click',()=>{
+  function animateSensorFrames(token) {
+    if(token!==requestToken || !robot.running)return;
+    if(sensorFrameIndex>=sensorFrames.length){
+      robot.running=false;
+      $('robotState').textContent='COMPLETE';
+      $('animateRobot').innerHTML='Run again <span>▶</span>';
+      return;
+    }
+    const frame=sensorFrames[sensorFrameIndex++];
+    robot={...robot,...frame, running:true, step:frame.step, sensors:frame.sensors || []};
+    drawTrack();
+    animationFrame=requestAnimationFrame(()=>animateSensorFrames(token));
+  }
+  async function runSensorSimulation() {
     if(robot.running)return;
-    if(robot.step>0 && $('robotState').textContent==='STOPPED') resetSensorRobot();
-    robot.running=true;$('robotState').textContent='RUNNING';$('animateRobot').innerHTML='Running… <span>Ⅱ</span>';
-    animationFrame=requestAnimationFrame(simulationTick);
-  });
+    const token=++requestToken;
+    robot.running=false;cancelAnimationFrame(animationFrame);
+    $('robotState').textContent='CALCULATING';$('animateRobot').disabled=true;
+    $('animateRobot').innerHTML='Calculating… <span>⟳</span>';
+    const {w,h}=fitCanvas(track,tctx);
+    const payload={
+      path, sensor_model:sensorModelApi[sensorModel.value], controller:sensorController.value,
+      pid:{kp:Number(sensorKp.value),ki:Number(sensorKi.value),kd:Number(sensorKd.value)},
+      canvas_width:Math.max(120,Math.round(w)),canvas_height:Math.max(120,Math.round(h)),
+      speed:1.45,max_steps:2200
+    };
+    try {
+      const response=await fetch(`${API_BASE}/api/sensor-simulate`,{
+        method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)
+      });
+      const data=await response.json();
+      if(!response.ok) throw new Error(data.detail || 'Sensor simulation request failed.');
+      if(token!==requestToken)return;
+      sensorFrames=data.frames || [];
+      if(!sensorFrames.length)throw new Error('The backend returned no simulation frames.');
+      sensorFrameIndex=0;
+      $('robotState').textContent='RUNNING';$('animateRobot').innerHTML='Running… <span>Ⅱ</span>';
+      robot.running=true;
+      animateSensorFrames(token);
+    } catch(error) {
+      if(token!==requestToken)return;
+      $('robotState').textContent='API ERROR';
+      $('animateRobot').innerHTML='Retry simulation <span>↻</span>';
+      $('sensorModelNote').textContent=`Could not run backend simulation: ${error.message}. Start FastAPI at http://127.0.0.1:8000 or check the deployed API URL.`;
+    } finally {
+      if(token===requestToken)$('animateRobot').disabled=false;
+    }
+  }
+  $('animateRobot').addEventListener('click',runSensorSimulation);
   $('resetRobot').addEventListener('click',resetSensorRobot);
-  [sensorKp,sensorKi,sensorKd].forEach(el=>el.addEventListener('input',()=>{updateSensorGains();}));
+  [sensorKp,sensorKi,sensorKd].forEach(el=>el.addEventListener('input',updateSensorGains));
   sensorController.addEventListener('change',updateSensorGains);
   sensorModel.addEventListener('change',()=>{
     resetSensorRobot();
     const n=sensorWeights[sensorModel.value].length;
     $('trackCanvas').setAttribute('aria-label',`Animated line-following robot with ${n} sensor${n===1?'':'s'}`);
-    updateSensorReadings(); drawTrack();
+    updateSensorReadings();drawTrack();
   });
   if ('ResizeObserver' in window) { new ResizeObserver(() => { drawChart(); drawTrack(); }).observe(chart.parentElement); } else window.addEventListener('resize',()=>{drawChart();drawTrack();});
   updateOutputs(); runSimulation(); updateSensorGains(); resetSensorRobot();
